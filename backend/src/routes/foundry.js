@@ -1,33 +1,27 @@
 import { query } from '../db/index.js';
+import { signFoundryToken, verifyFoundryToken } from '../services/foundryAuth.js';
 
 /**
  * Foundry VTT integration routes.
  *
- * Constraints:
- *  - No Foundry DB access
- *  - No auth override
- *  - No passwords stored
- *  - Pure URL generation + contextual query params
+ * GET  /foundry/launch            – returns signed-JWT launch URL
+ * POST /nimrod/verify             – Foundry module calls to decode JWT
+ * GET  /foundry/mapping           – GM: list all mappings
+ * PUT  /foundry/mapping           – GM: upsert mapping
+ * DELETE /foundry/mapping/:email  – GM: remove mapping
  */
 export async function foundryRoutes(fastify) {
-  /**
-   * GET /foundry/launch
-   *
-   * Resolves the authenticated user's Foundry mapping and returns a
-   * pre-built launch URL.  The client opens it in a new tab; Foundry's
-   * client-side module reads the query params and surfaces the character.
-   *
-   * Response 200: { url: string }
-   * Response 404: { error: string }  — user not mapped yet
-   * Response 503: { error: string }  — FOUNDRY_URL env var missing
-   */
+
+  // ── GET /foundry/launch ────────────────────────────────────────────────────
   fastify.get('/foundry/launch', async (req, reply) => {
     const foundryBaseUrl = process.env.FOUNDRY_URL?.replace(/\/$/, '');
-
     if (!foundryBaseUrl) {
-      return reply.code(503).send({
-        error: 'Foundry URL is not configured on the server.',
-      });
+      return reply.code(503).send({ error: 'Foundry URL is not configured on the server.' });
+    }
+
+    const secret = process.env.FOUNDRY_JWT_SECRET;
+    if (!secret) {
+      return reply.code(503).send({ error: 'Foundry JWT secret is not configured.' });
     }
 
     const { email } = req.user;
@@ -45,19 +39,48 @@ export async function foundryRoutes(fastify) {
 
     const { role, world, actor_name } = result.rows[0];
 
-    const params = new URLSearchParams({ world, role });
-    if (actor_name) params.set('actor', actor_name);
+    const payload = {
+      e:   email,
+      r:   role,
+      w:   world,
+      a:   actor_name || null,
+      exp: Math.floor(Date.now() / 1000) + 60,
+    };
 
-    const url = `${foundryBaseUrl}?${params.toString()}`;
+    const token = signFoundryToken(payload, secret);
+    const url   = `${foundryBaseUrl}?t=${token}`;
 
     return reply.send({ url });
   });
 
-  /**
-   * GET /foundry/mapping (GM only)
-   *
-   * Returns all mappings so the GM can inspect / manage them from the UI.
-   */
+  // ── POST /nimrod/verify ───────────────────────────────────────────────────
+  fastify.post('/nimrod/verify', async (req, reply) => {
+    const { token } = req.body ?? {};
+
+    if (!token) {
+      return reply.code(400).send({ error: 'token is required' });
+    }
+
+    const secret = process.env.FOUNDRY_JWT_SECRET;
+    if (!secret) {
+      return reply.code(503).send({ error: 'JWT secret not configured' });
+    }
+
+    try {
+      const payload = verifyFoundryToken(token, secret);
+
+      return reply.send({
+        email: payload.e,
+        role:  payload.r,
+        world: payload.w,
+        actor: payload.a ?? null,
+      });
+    } catch {
+      return reply.code(401).send({ error: 'Invalid token' });
+    }
+  });
+
+  // ── GET /foundry/mapping (GM only) ────────────────────────────────────────
   fastify.get('/foundry/mapping', async (req, reply) => {
     if (req.user.role !== 'GM') {
       return reply.code(403).send({ error: 'GM only' });
@@ -71,32 +94,21 @@ export async function foundryRoutes(fastify) {
     return reply.send(result.rows);
   });
 
-  /**
-   * PUT /foundry/mapping (GM only)
-   *
-   * Upserts a single user mapping.
-   *
-   * Body: { email, role, world, actor_name? }
-   */
-  fastify.put('/foundry/mapping', {
-    schema: {
-      body: {
-        type: 'object',
-        required: ['email', 'role', 'world'],
-        properties: {
-          email:      { type: 'string', format: 'email' },
-          role:       { type: 'string', enum: ['GM', 'PLAYER'] },
-          world:      { type: 'string', minLength: 1 },
-          actor_name: { type: 'string' },
-        },
-      },
-    },
-  }, async (req, reply) => {
+  // ── PUT /foundry/mapping (GM only) ────────────────────────────────────────
+  fastify.put('/foundry/mapping', async (req, reply) => {
     if (req.user.role !== 'GM') {
       return reply.code(403).send({ error: 'GM only' });
     }
 
-    const { email, role, world, actor_name = null } = req.body;
+    const { email, role, world, actor_name = null } = req.body ?? {};
+
+    if (!email || !role || !world) {
+      return reply.code(400).send({ error: 'email, role and world are required' });
+    }
+
+    if (!['GM', 'PLAYER'].includes(role)) {
+      return reply.code(400).send({ error: 'role must be GM or PLAYER' });
+    }
 
     const result = await query(
       `INSERT INTO user_foundry_map (email, role, world, actor_name)
@@ -112,25 +124,21 @@ export async function foundryRoutes(fastify) {
     return reply.code(200).send(result.rows[0]);
   });
 
-  /**
-   * DELETE /foundry/mapping/:email (GM only)
-   */
+  // ── DELETE /foundry/mapping/:email (GM only) ──────────────────────────────
   fastify.delete('/foundry/mapping/:email', async (req, reply) => {
     if (req.user.role !== 'GM') {
       return reply.code(403).send({ error: 'GM only' });
     }
 
-    const { email } = req.params;
-
     const result = await query(
       'DELETE FROM user_foundry_map WHERE email = $1 RETURNING email',
-      [email],
+      [req.params.email],
     );
 
     if (result.rowCount === 0) {
       return reply.code(404).send({ error: 'Mapping not found' });
     }
 
-    return reply.code(200).send({ deleted: email });
+    return reply.code(200).send({ deleted: req.params.email });
   });
 }

@@ -133,3 +133,74 @@ Decay: -1 tribute/day after 5 days of inactivity (cron at 03:00).
 | MISSION_CREATED | mission object |
 | MISSION_UPDATED | mission object |
 | MISSION_DELETED | `{ missionId }` |
+
+---
+
+## Foundry Integration
+
+Nimrod acts as an identity bridge between email authentication and Foundry VTT.  
+No passwords are stored. No Foundry database access is required.
+
+### How it works
+
+```
+User (email auth) → GET /foundry/launch → signed JWT → ?t=<token> → Foundry URL
+                                                                         ↓
+                                          Foundry module → POST /nimrod/verify
+                                                                         ↓
+                                                           { email, role, world, actor }
+                                                                         ↓
+                                                           actor.sheet.render(true)
+```
+
+1. **Nimrod authenticates** the user via Cloudflare email auth
+2. `GET /foundry/launch` looks up the user in `user_foundry_map` and returns a short-lived JWT (60 s TTL) embedded in the Foundry URL
+3. Foundry opens with `?t=<jwt>` in the query string
+4. The **Nimrod Bridge module** (installed in Foundry) calls `POST /nimrod/verify` on `ready`
+5. The backend verifies the JWT, returns `{ email, role, world, actor }`
+6. The module opens the matched actor's character sheet automatically
+
+### Database
+
+```sql
+CREATE TABLE IF NOT EXISTS user_foundry_map (
+  email       TEXT PRIMARY KEY,
+  role        TEXT NOT NULL CHECK (role IN ('GM', 'PLAYER')),
+  world       TEXT NOT NULL,
+  actor_name  TEXT   -- nullable: GMs typically have no character
+);
+```
+
+### GM Mapping API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET    | `/foundry/mapping`          | List all mappings (GM only) |
+| PUT    | `/foundry/mapping`          | Upsert a mapping (GM only) |
+| DELETE | `/foundry/mapping/:email`   | Remove a mapping (GM only) |
+
+### Environment variables
+
+```env
+FOUNDRY_URL=https://your-foundry-server
+# Generate with: openssl rand -hex 32
+FOUNDRY_JWT_SECRET=change_me_in_production
+```
+
+### Foundry module installation
+
+Copy `foundry-module/` into your Foundry `Data/modules/nimrod-bridge/` directory and enable it in the module settings.
+
+### Running Tests
+
+```bash
+cd backend
+npm install
+npm test
+```
+
+Tests cover:
+
+- `foundryAuth.test.js` — JWT service: sign, verify, expiry, tampering, wrong secret
+- `foundryLaunch.test.js` — `GET /foundry/launch`: 200 with JWT url, 404 missing mapping, GM null actor, email forwarded to DB query
+- `foundryVerify.test.js` — `POST /nimrod/verify`: valid decode, null actor, wrong secret, expired, tampered, missing body
