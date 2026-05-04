@@ -17,6 +17,7 @@ import { pollRoutes } from './routes/polls.js';
 import { cemeteryRoutes } from './routes/cemetery.js';
 import { mapRoutes } from './routes/maps.js';
 import { userRoutes, configRoutes } from './routes/users.js';
+import { foundryRoutes } from './routes/foundry.js';
 import { startCemeteryDecay } from './jobs/cemeteryDecay.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -86,6 +87,7 @@ await fastify.register(missionRoutes);
 await fastify.register(pollRoutes);
 await fastify.register(cemeteryRoutes);
 await fastify.register(mapRoutes);
+await fastify.register(foundryRoutes);
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 try {

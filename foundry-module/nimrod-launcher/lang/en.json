@@ -1,0 +1,6 @@
+{
+  "NIMROD.CharacterSuggested": "Character suggested by Nimrod: {name}",
+  "NIMROD.CharacterNotFound": "Nimrod suggested character \"{name}\" but it was not found in this world.",
+  "NIMROD.GMAccess": "GM access — welcome back, Dungeon Master.",
+  "NIMROD.WorldMismatch": "Warning: Nimrod launched with world \"{expected}\" but the active world is \"{active}\"."
+}
