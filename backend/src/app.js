@@ -30,11 +30,31 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
   });
 
   // ── Auth decoration ───────────────────────────────────────────────────────
-  if (mockUser) {
-    fastify.addHook('preHandler', async (req) => {
+  fastify.addHook('preHandler', async (req) => {
+    if (mockUser) {
       req.user = mockUser;
-    });
-  }
+      return;
+    }
+
+    const devEmail = process.env.DEV_USER_EMAIL;
+
+    if (devEmail) {
+      req.user = {
+        email: devEmail,
+        role: process.env.DEV_USER_ROLE || 'PLAYER',
+        name: process.env.DEV_USER_NAME || 'Dev'
+      };
+      return;
+    }
+
+    const email = req.headers['cf-access-authenticated-user-email'];
+
+    if (!email) {
+      throw fastify.httpErrors.unauthorized();
+    }
+
+    req.user = { email };
+  });
 
   // ── DB + service wiring ───────────────────────────────────────────────────
   // mockDb must be pool-shaped: { query, connect? }.
