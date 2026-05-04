@@ -1,26 +1,57 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { build } from '../src/app.js';
 
 const MOCK_USER_PLAYER = { id: 'u1', email: 'player@test.com', role: 'PLAYER', name: 'Player One' };
 const MOCK_USER_GM     = { id: 'u2', email: 'gm@test.com',     role: 'GM',     name: 'Game Master' };
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Build a pool mock that simulates an existing mapping (fast-path: query only).
+ * The SELECT returns one row immediately; connect() is never called.
+ */
+function existingMappingPool(row) {
+  return {
+    query: async () => ({ rows: [row], rowCount: 1 }),
+  };
+}
+
+/**
+ * Build a pool mock that simulates a new user (slow-path: transaction).
+ * query()  → rowCount:0  (no existing mapping)
+ * connect() → client that runs the serializable transaction
+ */
+function newUserPool({ countTotal, insertedRow }) {
+  const client = {
+    query: async (sql) => {
+      if (/BEGIN/i.test(sql))  return {};
+      if (/COMMIT/i.test(sql)) return {};
+      if (/COUNT/i.test(sql))  return { rows: [{ total: countTotal }] };
+      // INSERT ... RETURNING
+      return { rows: [insertedRow], rowCount: 1 };
+    },
+    release: () => {},
+  };
+  return {
+    query: async () => ({ rows: [], rowCount: 0 }),   // existing-check returns empty
+    connect: async () => client,
+  };
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
 describe('GET /foundry/launch', () => {
-  it('returns 200 with a url containing ?t= when mapping exists', async () => {
+
+  it('returns 200 with a url containing ?t= for an existing mapping', async () => {
     const app = await build({
       mockUser: MOCK_USER_PLAYER,
-      mockDb: {
-        query: async () => ({
-          rows:     [{ role: 'PLAYER', world: 'main', actor_name: 'Okaj' }],
-          rowCount: 1,
-        }),
-      },
+      mockDb:   existingMappingPool({ role: 'PLAYER', world: 'main', actor_name: 'Okaj' }),
     });
 
     const res = await app.inject({ method: 'GET', url: '/foundry/launch' });
 
     expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body);
-    expect(body.url).toMatch(/\?t=/);
+    expect(JSON.parse(res.body).url).toMatch(/\?t=/);
   });
 
   it('url starts with FOUNDRY_URL env value', async () => {
@@ -29,12 +60,7 @@ describe('GET /foundry/launch', () => {
 
     const app = await build({
       mockUser: MOCK_USER_PLAYER,
-      mockDb: {
-        query: async () => ({
-          rows:     [{ role: 'PLAYER', world: 'test-world', actor_name: 'Hero' }],
-          rowCount: 1,
-        }),
-      },
+      mockDb:   existingMappingPool({ role: 'PLAYER', world: 'test-world', actor_name: 'Hero' }),
     });
 
     const res  = await app.inject({ method: 'GET', url: '/foundry/launch' });
@@ -46,35 +72,54 @@ describe('GET /foundry/launch', () => {
   it('token in url is a valid 3-segment JWT', async () => {
     const app = await build({
       mockUser: MOCK_USER_PLAYER,
-      mockDb: {
-        query: async () => ({
-          rows:     [{ role: 'PLAYER', world: 'main', actor_name: 'Okaj' }],
-          rowCount: 1,
-        }),
-      },
+      mockDb:   existingMappingPool({ role: 'PLAYER', world: 'main', actor_name: 'Okaj' }),
     });
 
-    const res  = await app.inject({ method: 'GET', url: '/foundry/launch' });
-    const body = JSON.parse(res.body);
+    const res   = await app.inject({ method: 'GET', url: '/foundry/launch' });
+    const token = new URL(JSON.parse(res.body).url).searchParams.get('t');
 
-    const token = new URL(body.url).searchParams.get('t');
     expect(token).toBeTruthy();
     expect(token.split('.')).toHaveLength(3);
   });
 
-  it('returns 404 when mapping is missing', async () => {
+  it('auto-provisions first user as GM when table is empty', async () => {
+    process.env.FOUNDRY_JWT_SECRET = 'secret123';
+
     const app = await build({
-      mockUser: { id: 'u99', email: 'none@test.com', role: 'PLAYER', name: 'Ghost' },
-      mockDb: {
-        query: async () => ({ rows: [], rowCount: 0 }),
-      },
+      mockUser: MOCK_USER_PLAYER,
+      mockDb:   newUserPool({
+        countTotal:  0,
+        insertedRow: { role: 'GM', world: 'main', actor_name: null },
+      }),
     });
 
-    const res = await app.inject({ method: 'GET', url: '/foundry/launch' });
+    const res   = await app.inject({ method: 'GET', url: '/foundry/launch' });
+    expect(res.statusCode).toBe(200);
 
-    expect(res.statusCode).toBe(404);
-    const body = JSON.parse(res.body);
-    expect(body.error).toMatch(/mapping not found/i);
+    const token   = new URL(JSON.parse(res.body).url).searchParams.get('t');
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+
+    expect(payload.r).toBe('GM');
+  });
+
+  it('auto-provisions subsequent users as PLAYER', async () => {
+    process.env.FOUNDRY_JWT_SECRET = 'secret123';
+
+    const app = await build({
+      mockUser: MOCK_USER_PLAYER,
+      mockDb:   newUserPool({
+        countTotal:  1,
+        insertedRow: { role: 'PLAYER', world: 'main', actor_name: null },
+      }),
+    });
+
+    const res   = await app.inject({ method: 'GET', url: '/foundry/launch' });
+    expect(res.statusCode).toBe(200);
+
+    const token   = new URL(JSON.parse(res.body).url).searchParams.get('t');
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+
+    expect(payload.r).toBe('PLAYER');
   });
 
   it('GM with no actor_name gets a token with a=null', async () => {
@@ -82,40 +127,32 @@ describe('GET /foundry/launch', () => {
 
     const app = await build({
       mockUser: MOCK_USER_GM,
-      mockDb: {
-        query: async () => ({
-          rows:     [{ role: 'GM', world: 'main', actor_name: null }],
-          rowCount: 1,
-        }),
-      },
+      mockDb:   existingMappingPool({ role: 'GM', world: 'main', actor_name: null }),
     });
 
-    const res  = await app.inject({ method: 'GET', url: '/foundry/launch' });
-    const body = JSON.parse(res.body);
-
-    // Decode the token (no verification needed, just inspect payload)
-    const [, b64] = body.url.split('?t=')[1]?.split('.') ?? [];
-    const payload = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8'));
+    const res     = await app.inject({ method: 'GET', url: '/foundry/launch' });
+    const token   = new URL(JSON.parse(res.body).url).searchParams.get('t');
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
 
     expect(payload.a).toBeNull();
     expect(payload.r).toBe('GM');
   });
 
-  it('query receives the authenticated user email', async () => {
+  it('passes the authenticated user email through to the mapping lookup', async () => {
     const calls = [];
 
-    const app = await build({
-      mockUser: MOCK_USER_PLAYER,
-      mockDb: {
-        query: async (sql, params) => {
-          calls.push({ sql, params });
-          return { rows: [{ role: 'PLAYER', world: 'w', actor_name: 'X' }], rowCount: 1 };
-        },
+    const mockDb = {
+      query: async (sql, params) => {
+        calls.push({ sql, params });
+        return { rows: [{ role: 'PLAYER', world: 'w', actor_name: 'X' }], rowCount: 1 };
       },
-    });
+    };
+
+    const app = await build({ mockUser: MOCK_USER_PLAYER, mockDb });
 
     await app.inject({ method: 'GET', url: '/foundry/launch' });
 
     expect(calls[0].params).toContain(MOCK_USER_PLAYER.email);
   });
+
 });

@@ -9,13 +9,15 @@
 
 import Fastify from 'fastify';
 import { signFoundryToken, verifyFoundryToken } from './services/foundryAuth.js';
+import { resolveFoundryMapping } from './services/foundryMap.js';
 
 /**
  * @param {object} opts
  * @param {object} [opts.mockUser]   – If set, every request gets this user injected
  *                                     (bypasses cfAuthMiddleware). Used in tests.
- * @param {object} [opts.mockDb]     – If set, replaces the real `query` function.
- *                                     Must expose: { query: async (sql, params) => { rows } }
+ * @param {object} [opts.mockDb]     – Pool-compatible mock: { query, connect? }.
+ *                                     connect() must return a client stub for
+ *                                     transaction-path tests.
  * @param {boolean} [opts.logger]    – Fastify logger flag (default false in tests)
  */
 export async function build({ mockUser = null, mockDb = null, logger = false } = {}) {
@@ -29,37 +31,30 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
 
   // ── Auth decoration ───────────────────────────────────────────────────────
   if (mockUser) {
-    // Test mode: inject mock user on every request
     fastify.addHook('preHandler', async (req) => {
       req.user = mockUser;
     });
   }
 
-  // ── Foundry routes (inline, no real DB dependency) ───────────────────────
-  const dbQuery = mockDb
-    ? (sql, params) => mockDb.query(sql, params)
-    : (await import('./db/index.js')).query;
+  // ── DB + service wiring ───────────────────────────────────────────────────
+  // mockDb must be pool-shaped: { query, connect? }.
+  // resolveFoundryMapping receives the pool directly so tests can inject it.
+  const dbPool = mockDb ?? (await import('./db/index.js')).pool;
 
   const secret = process.env.FOUNDRY_JWT_SECRET || 'test_secret';
 
-  // GET /foundry/launch
+  // ── GET /foundry/launch ───────────────────────────────────────────────────
+  // Auto-provisions a Foundry mapping for first-time users.
+  // First user in an empty table → GM. All subsequent → PLAYER.
+  // Existing users are never modified.
   fastify.get('/foundry/launch', async (req, reply) => {
     if (!req.user) return reply.code(401).send({ error: 'Unauthorized' });
 
     const foundryBaseUrl = (process.env.FOUNDRY_URL || 'https://foundry.example.com').replace(/\/$/, '');
-
     const { email } = req.user;
 
-    const result = await dbQuery(
-      'SELECT role, world, actor_name FROM user_foundry_map WHERE email = $1',
-      [email],
-    );
-
-    if (!result.rows.length) {
-      return reply.code(404).send({ error: 'Mapping not found' });
-    }
-
-    const { role, world, actor_name } = result.rows[0];
+    const mapping = await resolveFoundryMapping(dbPool, email);
+    const { role, world, actor_name } = mapping;
 
     const payload = {
       e:   email,
@@ -73,7 +68,7 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
     return reply.send({ url: `${foundryBaseUrl}?t=${token}` });
   });
 
-  // POST /nimrod/verify
+  // ── POST /nimrod/verify ───────────────────────────────────────────────────
   fastify.post('/nimrod/verify', async (req, reply) => {
     const { token } = req.body ?? {};
     if (!token) return reply.code(400).send({ error: 'token is required' });
