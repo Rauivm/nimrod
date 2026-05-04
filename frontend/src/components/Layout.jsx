@@ -1,32 +1,55 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAuth, roleLabel } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
 import { api } from '../lib/api.js';
-import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink } from 'lucide-react';
+import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil } from 'lucide-react';
+import EditDisplayNameModal from './EditDisplayNameModal.jsx';
 
 function FoundryButton({ user }) {
   const [foundryUrl, setFoundryUrl] = useState(null);
-  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     api.get('/config').then(d => setFoundryUrl(d.foundryUrl)).catch(() => {});
   }, []);
-
-  const handleEnter = () => {
-    if (foundryUrl) window.open(foundryUrl, '_blank');
-  };
 
   if (!foundryUrl) return null;
 
   const label = user?.role === 'GM' ? 'Iniciar Aventura' : 'Entrar na Aventura';
 
   return (
-    <button onClick={handleEnter} className="foundry-btn" title={foundryUrl}>
+    <button onClick={() => window.open(foundryUrl, '_blank')} className="foundry-btn" title={foundryUrl}>
       <Sword size={15} strokeWidth={2.5} />
       <span>{label}</span>
       <ExternalLink size={11} style={{ opacity: 0.6 }} />
     </button>
+  );
+}
+
+function UserChip({ user }) {
+  const [showEdit, setShowEdit] = useState(false);
+
+  if (!user) return null;
+
+  return (
+    <>
+      <div className="user-chip">
+        <button
+          className="user-chip-name"
+          onClick={() => setShowEdit(true)}
+          title="Editar nome de exibição"
+        >
+          {user.displayName || user.name}
+          <Pencil size={10} className="chip-edit-icon" />
+        </button>
+        <span className="role-label">
+          {roleLabel(user.role)}
+        </span>
+        {user.role === 'GM' && <span className="gm-badge">GM</span>}
+      </div>
+
+      {showEdit && <EditDisplayNameModal onClose={() => setShowEdit(false)} />}
+    </>
   );
 }
 
@@ -46,20 +69,16 @@ export default function Layout() {
 
           <nav className="main-nav">
             <NavLink to="/" end className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Scroll size={14} />
-              <span>Taverna</span>
+              <Scroll size={14} /><span>Taverna</span>
             </NavLink>
             <NavLink to="/missions" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Sword size={14} />
-              <span>Missões</span>
+              <Sword size={14} /><span>Missões</span>
             </NavLink>
             <NavLink to="/cemetery" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Skull size={14} />
-              <span>Cemitério</span>
+              <Skull size={14} /><span>Cemitério</span>
             </NavLink>
             <NavLink to="/maps" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Map size={14} />
-              <span>Mapas</span>
+              <Map size={14} /><span>Mapas</span>
             </NavLink>
           </nav>
 
@@ -68,12 +87,7 @@ export default function Layout() {
               {connected ? <Wifi size={12} /> : <WifiOff size={12} />}
             </div>
             <FoundryButton user={user} />
-            {user && (
-              <div className="user-chip">
-                <span className="user-chip-name">{user.name}</span>
-                {user.role === 'GM' && <span className="gm-badge">GM</span>}
-              </div>
-            )}
+            <UserChip user={user} />
           </div>
         </div>
       </header>
@@ -94,14 +108,10 @@ export default function Layout() {
         }
         .header-inner {
           max-width: 1200px; margin: 0 auto;
-          padding: 0 24px;
-          height: 56px;
+          padding: 0 24px; height: 56px;
           display: flex; align-items: center; gap: 24px;
         }
-        .header-brand {
-          display: flex; align-items: center; gap: 8px;
-          flex-shrink: 0;
-        }
+        .header-brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
         .brand-sigil { color: var(--gold); font-size: 18px; }
         .brand-name {
           font-family: var(--font-display);
@@ -111,8 +121,7 @@ export default function Layout() {
         .brand-sub {
           font-size: 10px; color: var(--text-faint);
           letter-spacing: 1px; text-transform: uppercase;
-          padding: 2px 6px; border: 1px solid var(--border);
-          border-radius: 2px;
+          padding: 2px 6px; border: 1px solid var(--border); border-radius: 2px;
         }
 
         .main-nav { display: flex; gap: 4px; flex: 1; }
@@ -120,18 +129,14 @@ export default function Layout() {
           display: flex; align-items: center; gap: 6px;
           padding: 6px 12px; border-radius: var(--radius);
           color: var(--text-muted); font-size: 13px;
-          letter-spacing: 0.5px; text-transform: uppercase;
-          transition: all 0.15s;
+          letter-spacing: 0.5px; text-transform: uppercase; transition: all 0.15s;
         }
         .nav-link:hover { color: var(--text); background: var(--bg-card); }
         .nav-link.active { color: var(--gold); background: rgba(201,168,76,0.08); }
 
         .header-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 
-        .ws-indicator {
-          width: 8px; height: 8px; border-radius: 50%;
-          display: flex; align-items: center; justify-content: center;
-        }
+        .ws-indicator { width: 8px; height: 8px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
         .ws-indicator.connected { color: var(--emerald-bright); }
         .ws-indicator.disconnected { color: var(--crimson-bright); animation: pulse 1s infinite; }
 
@@ -139,12 +144,9 @@ export default function Layout() {
           display: flex; align-items: center; gap: 7px;
           padding: 7px 16px;
           background: linear-gradient(135deg, #8b2020 0%, #5a1010 100%);
-          border: 1px solid rgba(196,48,48,0.4);
-          border-radius: var(--radius);
-          color: #f0d8d8;
-          font-family: var(--font-display);
-          font-size: 11px; font-weight: 600;
-          letter-spacing: 1px; text-transform: uppercase;
+          border: 1px solid rgba(196,48,48,0.4); border-radius: var(--radius);
+          color: #f0d8d8; font-family: var(--font-display);
+          font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
           box-shadow: 0 2px 12px rgba(139,32,32,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
           transition: all 0.2s;
         }
@@ -155,32 +157,48 @@ export default function Layout() {
         }
         .foundry-btn:active { transform: translateY(0); }
 
+        /* ── User chip ───────────────────────────────────────────────────── */
         .user-chip {
           display: flex; align-items: center; gap: 6px;
           padding: 4px 10px;
           background: var(--bg-card);
-          border: 1px solid var(--border);
-          border-radius: var(--radius);
+          border: 1px solid var(--border); border-radius: var(--radius);
           font-size: 13px;
         }
-        .user-chip-name { color: var(--text); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .user-chip-name {
+          display: flex; align-items: center; gap: 5px;
+          background: none; color: var(--text);
+          max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          font-size: 13px; padding: 0;
+          border-radius: 2px; transition: color 0.15s;
+        }
+        .user-chip-name:hover { color: var(--gold); }
+        .chip-edit-icon { opacity: 0; transition: opacity 0.15s; flex-shrink: 0; }
+        .user-chip-name:hover .chip-edit-icon { opacity: 0.7; }
+
+        .role-label {
+          font-family: var(--font-display);
+          font-size: 9px; font-weight: 700;
+          color: var(--text-muted); letter-spacing: 0.8px;
+          text-transform: uppercase;
+        }
         .gm-badge {
           font-family: var(--font-display);
           font-size: 9px; font-weight: 700;
           color: var(--gold); letter-spacing: 1px;
           padding: 1px 5px;
           background: rgba(201,168,76,0.1);
-          border: 1px solid var(--gold-dim);
-          border-radius: 2px;
+          border: 1px solid var(--gold-dim); border-radius: 2px;
         }
 
         .site-main { flex: 1; max-width: 1200px; margin: 0 auto; width: 100%; padding: 24px; }
 
         @media (max-width: 768px) {
-          .brand-sub, .user-chip-name { display: none; }
+          .brand-sub, .role-label { display: none; }
           .nav-link span { display: none; }
           .header-inner { gap: 12px; padding: 0 12px; }
           .foundry-btn span { display: none; }
+          .user-chip-name { max-width: 80px; }
           .site-main { padding: 16px 12px; }
         }
       `}</style>

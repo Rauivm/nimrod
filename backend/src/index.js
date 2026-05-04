@@ -26,16 +26,10 @@ mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const fastify = Fastify({ logger: true });
 
-// ── Global error handler — must be registered BEFORE listen ──────────────────
 fastify.setErrorHandler((error, request, reply) => {
-  fastify.log.error(
-    { err: error, url: request.url, method: request.method },
-    'Request error'
-  );
+  fastify.log.error({ err: error, url: request.url, method: request.method }, 'Request error');
   const status = error.statusCode || 500;
-  reply.code(status).send({
-    error: error.message || 'Internal Server Error',
-  });
+  reply.code(status).send({ error: error.message || 'Internal Server Error' });
 });
 
 // ── Plugins ───────────────────────────────────────────────────────────────────
@@ -54,7 +48,6 @@ await fastify.register(staticFiles, {
 
 // ── Public routes (no auth) ───────────────────────────────────────────────────
 await fastify.register(configRoutes);
-
 fastify.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
 
 // ── WebSocket (auth inside handler) ──────────────────────────────────────────
@@ -78,9 +71,24 @@ fastify.register(async function wsPlugin(app) {
   });
 });
 
-// ── Authenticated routes ──────────────────────────────────────────────────────
+// ── Auth middleware (runs for all routes registered after this point) ─────────
 fastify.addHook('preHandler', cfAuthMiddleware);
 
+// ── LGPD consent guard ────────────────────────────────────────────────────────
+// Allow /me and /me/consent through unconditionally so the frontend can
+// display the consent modal and submit consent without being blocked.
+const CONSENT_EXEMPT = ['/me', '/me/consent', '/config', '/health'];
+
+fastify.addHook('preHandler', async (req, reply) => {
+  if (!req.user) return;
+  if (CONSENT_EXEMPT.some(p => req.routerPath === p || req.url === p)) return;
+
+  if (!req.user.lgpd_consent) {
+    return reply.code(403).send({ error: 'LGPD consent required', code: 'LGPD_REQUIRED' });
+  }
+});
+
+// ── Authenticated routes ──────────────────────────────────────────────────────
 await fastify.register(userRoutes);
 await fastify.register(postRoutes);
 await fastify.register(missionRoutes);

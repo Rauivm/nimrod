@@ -6,10 +6,11 @@ import { query } from '../db/index.js';
  *    Changing .env + restart instantly changes identity/role.
  * 2. Otherwise → trust Cloudflare Access headers.
  * 3. No CF headers in production → 401.
+ *
+ * After upsert, req.user is guaranteed to have:
+ *   { id, email, name, display_name, role, lgpd_consent, lgpd_consent_at, ... }
  */
 export async function cfAuthMiddleware(request, reply) {
-  // Dev override: takes precedence over everything when set to a non-empty value.
-  // docker-compose passes DEV_USER_EMAIL as empty string when unset — guard against that.
   const devEmail = process.env.DEV_USER_EMAIL?.trim();
   if (devEmail) {
     const devName = process.env.DEV_USER_NAME?.trim() || 'Dev User';
@@ -18,7 +19,6 @@ export async function cfAuthMiddleware(request, reply) {
     return;
   }
 
-  // Production path: trust Cloudflare Access injected headers
   const emailHeader = process.env.CLOUDFLARE_HEADER_EMAIL || 'cf-access-authenticated-user-email';
   const nameHeader  = process.env.CLOUDFLARE_HEADER_NAME  || 'cf-access-user-name';
 
@@ -34,22 +34,32 @@ export async function cfAuthMiddleware(request, reply) {
 }
 
 /**
- * @param {boolean} forceRole - true in dev mode: always write the supplied role.
- *                              false in production: preserve manually-promoted GMs.
+ * Insert or update a user row, deriving display_name from email on first insert.
+ *
+ * @param {string}  email
+ * @param {string}  name        – from CF header or email prefix
+ * @param {string}  role        – 'GM' | 'PLAYER'
+ * @param {boolean} forceRole   – true in dev: always overwrite role
  */
 async function upsertUser(email, name, role, forceRole) {
+  // Derive a clean nickname from the local-part of the email (before @).
+  const derivedDisplayName = email.split('@')[0].toLowerCase();
+
   const sql = forceRole
-    ? `INSERT INTO users (email, name, role)
-       VALUES ($1, $2, $3)
+    ? `INSERT INTO users (email, name, display_name, role)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (email) DO UPDATE
-         SET name = EXCLUDED.name, role = EXCLUDED.role
+         SET name         = EXCLUDED.name,
+             display_name = COALESCE(users.display_name, EXCLUDED.display_name),
+             role         = EXCLUDED.role
        RETURNING *`
-    : `INSERT INTO users (email, name, role)
-       VALUES ($1, $2, $3)
+    : `INSERT INTO users (email, name, display_name, role)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (email) DO UPDATE
-         SET name = EXCLUDED.name
+         SET name         = EXCLUDED.name,
+             display_name = COALESCE(users.display_name, EXCLUDED.display_name)
        RETURNING *`;
 
-  const res = await query(sql, [email, name, role]);
+  const res = await query(sql, [email, name, derivedDisplayName, role]);
   return res.rows[0];
 }
