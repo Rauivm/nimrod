@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../lib/api.js';
 
 /**
@@ -14,12 +14,16 @@ import { api } from '../lib/api.js';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser]     = useState(null);
+  const [user, setUser]       = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Stable ref so WS callbacks see the latest user without recreating.
+  const userRef = useRef(null);
+  useEffect(() => { userRef.current = user; }, [user]);
 
   const refresh = useCallback(() => {
     return api.get('/me')
-      .then(setUser)
+      .then(data => { setUser(data); return data; })
       .catch(() => setUser(null));
   }, []);
 
@@ -28,7 +32,7 @@ export function AuthProvider({ children }) {
   }, [refresh]);
 
   return (
-    <AuthContext.Provider value={{ user, setUser, loading, refresh }}>
+    <AuthContext.Provider value={{ user, setUser, loading, refresh, userRef }}>
       {children}
     </AuthContext.Provider>
   );

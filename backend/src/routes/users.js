@@ -1,32 +1,28 @@
 import { query } from '../db/index.js';
-import { getOnlineUserIds } from '../ws/broadcast.js';
+import { getOnlineUserIds, broadcast } from '../ws/broadcast.js';
 
 export async function userRoutes(fastify) {
 
   // ── GET /me ──────────────────────────────────────────────────────────────
-  // Returns the authenticated user's identity.
-  // role is always set (guaranteed by cfAuthMiddleware upsert).
-  // Email is masked for privacy (LGPD).
   fastify.get('/me', async (req) => {
     const u = req.user;
     return {
-      id:           u.id,
-      email:        maskEmail(u.email),
-      role:         u.role,
-      displayName:  u.display_name,
-      lgpdConsent:  u.lgpd_consent ?? false,
+      id:          u.id,
+      email:       maskEmail(u.email),
+      role:        u.role,
+      displayName: u.display_name,
+      lgpdConsent: u.lgpd_consent ?? false,
     };
   });
 
   // ── PATCH /me ─────────────────────────────────────────────────────────────
-  // Update display name.
   fastify.patch('/me', {
     schema: {
       body: {
         type: 'object',
         properties: {
           displayName: { type: 'string', minLength: 1, maxLength: 40 },
-          name:        { type: 'string', minLength: 1 },   // legacy compat
+          name:        { type: 'string', minLength: 1 },
         },
       },
     },
@@ -37,10 +33,7 @@ export async function userRoutes(fastify) {
     }
 
     const res = await query(
-      `UPDATE users
-          SET display_name = $1, name = $1
-        WHERE id = $2
-      RETURNING *`,
+      `UPDATE users SET display_name = $1, name = $1 WHERE id = $2 RETURNING *`,
       [displayName.trim(), req.user.id],
     );
 
@@ -55,19 +48,15 @@ export async function userRoutes(fastify) {
   });
 
   // ── POST /me/consent ──────────────────────────────────────────────────────
-  // Record explicit LGPD consent.
   fastify.post('/me/consent', async (req, reply) => {
     const { consent } = req.body ?? {};
-
     if (consent !== true) {
       return reply.code(400).send({ error: 'consent must be true' });
     }
 
     const res = await query(
-      `UPDATE users
-          SET lgpd_consent = TRUE, lgpd_consent_at = NOW()
-        WHERE id = $1
-      RETURNING *`,
+      `UPDATE users SET lgpd_consent = TRUE, lgpd_consent_at = NOW()
+       WHERE id = $1 RETURNING *`,
       [req.user.id],
     );
 
@@ -96,9 +85,7 @@ export async function userRoutes(fastify) {
     if (!onlineIds.length) return [];
     const res = await query(
       `SELECT id, display_name AS "displayName", role
-         FROM users
-        WHERE id = ANY($1)
-        ORDER BY display_name`,
+         FROM users WHERE id = ANY($1) ORDER BY display_name`,
       [onlineIds],
     );
     return res.rows;
@@ -117,12 +104,31 @@ export async function userRoutes(fastify) {
     if (req.user.role !== 'GM') {
       return reply.code(403).send({ error: 'GM only' });
     }
+
     const res = await query(
       'UPDATE users SET role = $1 WHERE id = $2 RETURNING *',
       [req.body.role, req.params.id],
     );
-    if (!res.rows.length) return reply.code(404).send({ error: 'User not found' });
-    return res.rows[0];
+
+    if (!res.rows.length) {
+      return reply.code(404).send({ error: 'User not found' });
+    }
+
+    const updated = res.rows[0];
+
+    // Notify ALL connected clients so anyone affected can refresh their
+    // identity. The target user's AuthContext listens for ROLE_UPDATED
+    // and calls /me automatically — no page reload needed.
+    broadcast('ROLE_UPDATED', {
+      userId: updated.id,
+      role:   updated.role,
+    });
+
+    return {
+      id:          updated.id,
+      displayName: updated.display_name,
+      role:        updated.role,
+    };
   });
 }
 
@@ -133,13 +139,7 @@ export async function configRoutes(fastify) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Mask email for LGPD: show first 3 chars + *** + domain.
- * e.g. "player@example.com" → "pla***@example.com"
- */
 function maskEmail(email) {
   const [local, domain] = email.split('@');
-  const visible = local.slice(0, 3);
-  return `${visible}***@${domain}`;
+  return `${local.slice(0, 3)}***@${domain}`;
 }

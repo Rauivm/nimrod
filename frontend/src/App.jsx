@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useEffect } from 'react-router-dom';
 import { useState } from 'react';
 import Layout from './components/Layout.jsx';
 import HomePage from './pages/HomePage.jsx';
@@ -8,6 +8,7 @@ import MapsPage from './pages/MapsPage.jsx';
 import SplashScreen from './components/SplashScreen.jsx';
 import LgpdConsentModal from './components/LgpdConsentModal.jsx';
 import { useAuth } from './contexts/AuthContext.jsx';
+import { useWs } from './contexts/WsContext.jsx';
 
 function LoadingScreen() {
   return (
@@ -25,22 +26,43 @@ function LoadingScreen() {
   );
 }
 
+/**
+ * RoleSyncBridge
+ *
+ * Sits inside both AuthContext and WsContext.
+ * Listens for ROLE_UPDATED events and refreshes /me automatically
+ * when the current user's role changes — no page reload needed.
+ */
+function RoleSyncBridge() {
+  const { userRef, refresh } = useAuth();
+  const { on } = useWs();
+
+  useEffect(() => {
+    const unsub = on('ROLE_UPDATED', ({ userId } = {}) => {
+      if (userId && userRef.current?.id === userId) {
+        refresh();
+      }
+    });
+    return unsub;
+  }, [on, userRef, refresh]);
+
+  return null;
+}
+
 export default function App() {
   const { user, loading } = useAuth();
   const [splashDone, setSplashDone] = useState(false);
 
-  const showSplash = !splashDone;
+  const showSplash    = !splashDone;
+  const needsConsent  = !loading && splashDone && user && !user.lgpdConsent;
 
   if (loading && splashDone) return <LoadingScreen />;
 
-  // Block the app until the user has accepted LGPD terms.
-  // Only shown once auth is resolved and user is present.
-  const needsConsent = !loading && splashDone && user && !user.lgpdConsent;
-
   return (
     <>
-      {showSplash && <SplashScreen onDone={() => setSplashDone(true)} />}
+      <RoleSyncBridge />
 
+      {showSplash && <SplashScreen onDone={() => setSplashDone(true)} />}
       {needsConsent && <LgpdConsentModal />}
 
       <Routes>
