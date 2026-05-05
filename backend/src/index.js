@@ -52,13 +52,10 @@ fastify.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
 
 // ── WebSocket (auth inside handler) ──────────────────────────────────────────
 fastify.register(async function wsPlugin(app) {
-  app.get('/ws', { websocket: true }, async (socket, req) => {
-    let user = null;
-    const fakeReply = { code: () => fakeReply, send: () => fakeReply };
-    try {
-      await cfAuthMiddleware(req, fakeReply);
-      user = req.user;
-    } catch {}
+  app.get('/ws', { websocket: true }, (connection, req) => {
+    const socket = connection.socket;
+
+    const user = req.user; // já vem do hook global
 
     if (!user) {
       socket.send(JSON.stringify({ type: 'ERROR', error: 'Unauthorized' }));
@@ -67,17 +64,37 @@ fastify.register(async function wsPlugin(app) {
     }
 
     registerClient(socket, user.id);
+
     socket.send(JSON.stringify({ type: 'CONNECTED', ts: Date.now() }));
   });
 });
 
 // ── Auth middleware (runs for all routes registered after this point) ─────────
-fastify.addHook('preHandler', cfAuthMiddleware);
+fastify.addHook('preHandler', async (req, reply) => {
+  const PUBLIC = ['/health', '/config'];
+
+  if (PUBLIC.includes(req.routerPath)) return;
+
+  await cfAuthMiddleware(req, reply);
+
+  if (!req.user) return;
+
+  const CONSENT_EXEMPT = ['/me', '/me/consent', '/config', '/health'];
+
+  if (CONSENT_EXEMPT.includes(req.routerPath)) return;
+
+  if (!req.user.lgpd_consent) {
+    return reply.code(403).send({
+      error: 'LGPD consent required',
+      code: 'LGPD_REQUIRED',
+    });
+  }
+});
 
 // ── LGPD consent guard ────────────────────────────────────────────────────────
 // Allow /me and /me/consent through unconditionally so the frontend can
 // display the consent modal and submit consent without being blocked.
-const CONSENT_EXEMPT = ['/me', '/me/consent', '/config', '/health'];
+/* const CONSENT_EXEMPT = ['/me', '/me/consent', '/config', '/health'];
 
 fastify.addHook('preHandler', async (req, reply) => {
   if (!req.user) return;
@@ -86,7 +103,7 @@ fastify.addHook('preHandler', async (req, reply) => {
   if (!req.user.lgpd_consent) {
     return reply.code(403).send({ error: 'LGPD consent required', code: 'LGPD_REQUIRED' });
   }
-});
+}); */
 
 // ── Authenticated routes ──────────────────────────────────────────────────────
 await fastify.register(userRoutes);
