@@ -261,12 +261,15 @@ export default function HomePage() {
 
   useEffect(() => {
     const u1 = on('POST_CREATED',    () => loadPosts());
-    const u2 = on('POST_LIKED',      () => loadPosts());
+    const u2 = on('POST_LIKED', ({ postId, likeCount, liked }) => {
+      setPosts(prev => prev.map(p => p.id === postId ? { ...p, likeCount, likedByMe: liked } : p));
+    });
     const u3 = on('POST_DELETED',    () => loadPosts());
+    const u7 = on('REPLY_CREATED',   () => {});
     const u4 = on('MISSION_CREATED', () => loadMissions());
     const u5 = on('MISSION_UPDATED', () => loadMissions());
     const u6 = on('MISSION_DELETED', () => loadMissions());
-    return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7?.(); };
   }, [on, loadPosts, loadMissions]);
 
   const visibleMissions = missionsExpanded ? missions : missions.slice(0, 3);
@@ -304,7 +307,7 @@ export default function HomePage() {
                   <Layers size={11} />
                   {isWood ? 'Neutro' : 'Madeira'}
                 </button>
-                {user?.role === 'GM' && (
+                {(
                   <button onClick={() => setShowCreateMission(true)} className="create-btn">
                     <Plus size={13} /> Nova Missão
                   </button>
@@ -333,7 +336,7 @@ export default function HomePage() {
         <section>
           <div className="section-header">
             <h2 className="section-title">📜 Taverna</h2>
-            {user?.role === 'GM' && missions.length === 0 && (
+            {missions.length === 0 && (
               <button onClick={() => setShowCreateMission(true)} className="create-btn">
                 <Plus size={13} /> Nova Missão
               </button>

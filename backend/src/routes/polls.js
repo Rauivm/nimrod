@@ -3,7 +3,7 @@ import { broadcast } from '../ws/broadcast.js';
 
 async function getPollWithOptions(pollId, userId) {
   const poll = await query(
-    `SELECT p.*, u.name as creator_name,
+    `SELECT p.*, COALESCE(u.display_name, u.name) AS creator_name,
             (SELECT option_id FROM poll_votes WHERE poll_id = p.id AND user_id = $2) as my_vote_option_id,
             (SELECT COUNT(*) FROM poll_votes WHERE poll_id = p.id) as total_votes
      FROM polls p
@@ -25,7 +25,7 @@ export async function pollRoutes(fastify) {
   // GET /polls
   fastify.get('/polls', async (req) => {
     const polls = await query(
-      `SELECT p.*, u.name as creator_name,
+      `SELECT p.*, COALESCE(u.display_name, u.name) AS creator_name,
               (SELECT option_id FROM poll_votes WHERE poll_id = p.id AND user_id = $1) as my_vote_option_id,
               (SELECT COUNT(*) FROM poll_votes WHERE poll_id = p.id) as total_votes
        FROM polls p

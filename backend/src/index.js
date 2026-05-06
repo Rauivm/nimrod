@@ -94,7 +94,7 @@ fastify.addHook('preHandler', async (req, reply) => {
  
   // LGPD guard — /me and /me/consent must pass through so the frontend
   // can render the consent modal and record acceptance.
-  if (matchesPath(req, '/me', '/me/consent')) return;
+  if (matchesPath(req, '/me', '/me/consent', '/me/display-name')) return;
  
   // In dev mode (DEV_USER_EMAIL set) bypass consent check entirely.
   if (process.env.DEV_USER_EMAIL?.trim()) return;

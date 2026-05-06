@@ -1,15 +1,9 @@
 import { query } from '../db/index.js';
 
-/**
- * Auth strategy:
- * 1. If DEV_USER_EMAIL is set (non-empty) → always use dev user (ignores CF headers).
- *    Changing .env + restart instantly changes identity/role.
- * 2. Otherwise → trust Cloudflare Access headers.
- * 3. No CF headers in production → 401.
- *
- * After upsert, req.user is guaranteed to have:
- *   { id, email, name, display_name, role, lgpd_consent, lgpd_consent_at, ... }
- */
+const FALLBACK_NAMES = [
+  'Rapariga', 'Quenga', 'Bitch', 'Raissa Rayana', 'Bala Halls', 'Rapariga',
+];
+
 export async function cfAuthMiddleware(request, reply) {
   const devEmail = process.env.DEV_USER_EMAIL?.trim();
   if (devEmail) {
@@ -25,41 +19,39 @@ export async function cfAuthMiddleware(request, reply) {
   const email  = request.headers[emailHeader];
   const cfName = request.headers[nameHeader];
 
-  if (!email) {
-    return reply.code(401).send({ error: 'Unauthorized' });
-  }
+  if (!email) return reply.code(401).send({ error: 'Unauthorized' });
 
   const name = cfName || email.split('@')[0];
   request.user = await upsertUser(email, name, 'PLAYER', false);
 }
 
 /**
- * Insert or update a user row, deriving display_name from email on first insert.
+ * Upsert user.
  *
- * @param {string}  email
- * @param {string}  name        – from CF header or email prefix
- * @param {string}  role        – 'GM' | 'PLAYER'
- * @param {boolean} forceRole   – true in dev: always overwrite role
+ * display_name is NOT in the INSERT column list — it defaults to NULL
+ * (migration 007 made it nullable). This lets the frontend detect first-login
+ * and show ChooseNameModal.
+ *
+ * On conflict: display_name is never touched here; the user owns it.
  */
 async function upsertUser(email, name, role, forceRole) {
-  // Derive a clean nickname from the local-part of the email (before @).
-  const derivedDisplayName = email.split('@')[0].toLowerCase();
-
   const sql = forceRole
-    ? `INSERT INTO users (email, name, display_name, role)
-       VALUES ($1, $2, $3, $4)
+    ? `INSERT INTO users (email, name, role)
+       VALUES ($1, $2, $3)
        ON CONFLICT (email) DO UPDATE
-         SET name         = EXCLUDED.name,
-             display_name = COALESCE(users.display_name, EXCLUDED.display_name),
-             role         = EXCLUDED.role
+         SET name = EXCLUDED.name,
+             role = EXCLUDED.role
        RETURNING *`
-    : `INSERT INTO users (email, name, display_name, role)
-       VALUES ($1, $2, $3, $4)
+    : `INSERT INTO users (email, name, role)
+       VALUES ($1, $2, $3)
        ON CONFLICT (email) DO UPDATE
-         SET name         = EXCLUDED.name,
-             display_name = COALESCE(users.display_name, EXCLUDED.display_name)
+         SET name = EXCLUDED.name
        RETURNING *`;
 
-  const res = await query(sql, [email, name, derivedDisplayName, role]);
+  const res = await query(sql, [email, name, role]);
   return res.rows[0];
+}
+
+export function pickFallbackName() {
+  return FALLBACK_NAMES[Math.floor(Math.random() * FALLBACK_NAMES.length)];
 }

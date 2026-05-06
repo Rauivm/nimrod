@@ -4,7 +4,7 @@ import { broadcast } from '../ws/broadcast.js';
 async function getMissionWithCounts(missionId, userId) {
   const res = await query(
     `SELECT m.*,
-            u.name as creator_name,
+            COALESCE(u.display_name, u.name) AS creator_name,
             COUNT(CASE WHEN mp.type = 'PLAYER' THEN 1 END) as player_count,
             COUNT(CASE WHEN mp.type = 'RESERVE' THEN 1 END) as reserve_count,
             EXISTS(SELECT 1 FROM mission_participants WHERE mission_id = m.id AND user_id = $2) as user_joined,
@@ -16,7 +16,7 @@ async function getMissionWithCounts(missionId, userId) {
      LEFT JOIN mission_participants mp ON mp.mission_id = m.id
      LEFT JOIN mission_ratings mr ON mr.mission_id = m.id
      WHERE m.id = $1
-     GROUP BY m.id, u.name`,
+     GROUP BY m.id, u.id, u.name, u.display_name`,
     [missionId, userId]
   );
   if (!res.rows[0]) return null;
@@ -51,7 +51,7 @@ async function getReactions(missionId, userId) {
 async function getPollForMission(pollId, userId) {
   try {
     const poll = await query(
-      `SELECT p.*, u.name as creator_name,
+      `SELECT p.*, COALESCE(u.display_name, u.name) AS creator_name,
               (SELECT option_id FROM poll_votes WHERE poll_id = p.id AND user_id = $2) as my_vote_option_id,
               (SELECT COUNT(*) FROM poll_votes WHERE poll_id = p.id) as total_votes
        FROM polls p JOIN users u ON u.id = p.creator_id WHERE p.id = $1`,
@@ -71,7 +71,7 @@ export async function missionRoutes(fastify) {
     const { status, kind } = req.query;
     let sql = `
       SELECT m.*,
-             u.name as creator_name,
+             COALESCE(u.display_name, u.name) AS creator_name,
              COUNT(CASE WHEN mp.type = 'PLAYER' THEN 1 END) as player_count,
              COUNT(CASE WHEN mp.type = 'RESERVE' THEN 1 END) as reserve_count,
              EXISTS(SELECT 1 FROM mission_participants mp2 WHERE mp2.mission_id = m.id AND mp2.user_id = $1) as user_joined,
@@ -88,7 +88,7 @@ export async function missionRoutes(fastify) {
     if (kind)   { params.push(kind.toUpperCase());   where.push(`m.kind = $${params.length}`); }
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
 
-    sql += ' GROUP BY m.id, u.name ORDER BY m.created_at DESC';
+    sql += ' GROUP BY m.id, u.id, u.name, u.display_name ORDER BY m.created_at DESC';
     const res = await query(sql, params);
     if (!res.rows.length) return [];
 
@@ -146,7 +146,7 @@ export async function missionRoutes(fastify) {
     if (!mission) return reply.code(404).send({ error: 'Mission not found' });
 
     const participants = await query(
-      `SELECT mp.*, u.name, u.email, u.role
+      `SELECT mp.*, COALESCE(u.display_name, u.name) AS name, u.role
        FROM mission_participants mp JOIN users u ON u.id = mp.user_id
        WHERE mp.mission_id = $1 ORDER BY mp.joined_at ASC`,
       [req.params.id]
