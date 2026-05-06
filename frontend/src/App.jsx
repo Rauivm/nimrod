@@ -17,7 +17,9 @@ function LoadingScreen() {
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       height: '100vh', flexDirection: 'column', gap: '16px',
     }}>
-      <div style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: 'var(--gold)', letterSpacing: '4px' }}>NIMROD</div>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: 'var(--gold)', letterSpacing: '4px' }}>
+        NIMROD
+      </div>
       <div style={{ color: 'var(--text-muted)', fontSize: '13px', animation: 'pulse 1.5s infinite' }}>
         Carregando aventura...
       </div>
@@ -42,58 +44,51 @@ export default function App() {
   const { user, loading } = useAuth();
   const [splashDone, setSplashDone] = useState(false);
 
-  //if (loading && splashDone) return <LoadingScreen />;
+  // LGPD: informational only, localStorage-controlled, never blocks routes.
+  const [lgpdSeen, setLgpdSeen] = useState(
+    () => !!localStorage.getItem('lgpd_seen'),
+  );
 
-  // Blocking gates — resolved in strict order:
-  //   1. Splash animation
-  //   2. LGPD consent
-  //   3. Display name selection (first login)
-  //   4. App
-  const showConsentModal =
-    !loading &&
-    splashDone &&
-    user &&
-    !localStorage.getItem('lgpd_seen');
+  // Display-name modal: shown once after first login when name is null.
+  // Does NOT block routes — rendered alongside the app, not instead of it.
+  const needsName = !loading && splashDone && user && !user.displayName;
 
-  const needsName =
-    !loading &&
-    splashDone &&
-    user &&
-    !user.displayName;
+  // Show LGPD once (after splash, after auth resolved, only if not seen).
+  const showLgpd = !lgpdSeen && !loading && splashDone && !!user;
+
+  const handleLgpdClose = () => {
+    localStorage.setItem('lgpd_seen', 'true');
+    setLgpdSeen(true);
+  };
 
   return (
     <>
       <RoleSyncBridge />
 
-      {!splashDone && (
-        <SplashScreen onDone={() => setSplashDone(true)} />
-      )}
+      {/* Step 1: splash animation */}
+      {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
 
+      {/* Step 2: auth loading (only after splash) */}
       {loading && splashDone && <LoadingScreen />}
 
-      {showConsentModal && <LgpdConsentModal />}
+      {/* LGPD: informational overlay — never blocks routes */}
+      {showLgpd && <LgpdConsentModal onClose={handleLgpdClose} />}
+
+      {/* Display-name modal: shown on top of app, not instead of it */}
       {needsName && <ChooseNameModal />}
 
-      <div style={{
-        position: 'fixed',
-        top: 10,
-        left: 10,
-        color: 'white',
-        zIndex: 999999,
-      }}>
-      </div>
-
+      {/* Routes always render once splash is done and auth resolved */}
       {!loading && splashDone && (
-          <Routes>
-            <Route path="/" element={<Layout />}>
-              <Route index element={<HomePage />} />
-              <Route path="missions" element={<MissionsPage />} />
-              <Route path="cemetery" element={<CemeteryPage />} />
-              <Route path="maps" element={<MapsPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Route>
-          </Routes>
-        )}
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<HomePage />} />
+            <Route path="missions" element={<MissionsPage />} />
+            <Route path="cemetery" element={<CemeteryPage />} />
+            <Route path="maps" element={<MapsPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      )}
     </>
   );
 }

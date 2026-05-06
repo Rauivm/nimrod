@@ -1,5 +1,6 @@
 import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
+import { notifyMissionCreated, notifyNoticeCreated } from '../services/notifier/notifier.js';
 
 async function getMissionWithCounts(missionId, userId) {
   const res = await query(
@@ -216,6 +217,14 @@ export async function missionRoutes(fastify) {
 
     const mission = await getMissionWithCounts(res.rows[0].id, req.user.id);
     broadcast('MISSION_CREATED', mission);
+
+    // Notify Discord — split by kind
+    if (resolvedKind === 'NOTICE') {
+      notifyNoticeCreated(mission).catch(() => {});
+    } else {
+      notifyMissionCreated(mission).catch(() => {});
+    }
+
     return reply.code(201).send(mission);
   });
 

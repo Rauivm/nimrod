@@ -1,5 +1,6 @@
 import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
+import { notifyPollCreated } from '../services/notifier/notifier.js';
 
 async function getPollWithOptions(pollId, userId) {
   const poll = await query(
@@ -78,6 +79,7 @@ export async function pollRoutes(fastify) {
 
     const full = await getPollWithOptions(poll.id, req.user.id);
     broadcast('POLL_CREATED', full);
+    notifyPollCreated(full).catch(() => {});
     return reply.code(201).send(full);
   });
 

@@ -6,13 +6,15 @@ import { Feather } from 'lucide-react';
 /**
  * ChooseNameModal
  *
- * Shown once: after LGPD consent, when display_name is NULL.
- * Empty submission sends "" to PATCH /me/display-name.
- * Backend assigns a random fallback — frontend never picks names.
+ * Shown once after first login when user.displayName is null.
+ * Does NOT block routes — renders on top of the app.
+ *
+ * Empty submission is valid: backend assigns a random fallback name.
+ * No reload required — AuthContext.refresh() updates the user in place.
  */
 export default function ChooseNameModal() {
   const { refresh } = useAuth();
-  const [value, setValue]   = useState('');
+  const [value, setValue]     = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
 
@@ -20,9 +22,10 @@ export default function ChooseNameModal() {
     setLoading(true);
     setError(null);
     try {
-      // Backend accepts empty string and assigns fallback automatically.
+      // Backend accepts empty string → assigns random fallback name
       await api.patch('/me/display-name', { displayName: value.trim() });
       await refresh();
+      // After refresh, user.displayName will be set → this modal unmounts
     } catch (err) {
       setError(err.message || 'Erro ao salvar nome.');
       setLoading(false);
@@ -30,7 +33,7 @@ export default function ChooseNameModal() {
   };
 
   const handleKey = (e) => {
-    if (e.key === 'Enter') submit();
+    if (e.key === 'Enter' && !loading) submit();
   };
 
   return (
@@ -64,8 +67,8 @@ export default function ChooseNameModal() {
 
       <style>{`
         .cn-overlay {
-          position: fixed; inset: 0; z-index: 1000;
-          background: rgba(5,4,2,0.97);
+          position: fixed; inset: 0; z-index: 800;
+          background: rgba(5,4,2,0.94);
           backdrop-filter: blur(8px);
           display: flex; align-items: center; justify-content: center;
           padding: 24px;

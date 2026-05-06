@@ -1,5 +1,6 @@
 import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
+import { notifyPostCreated } from '../services/notifier/notifier.js';
 
 const MAX_DEPTH = 3;
 
@@ -135,6 +136,12 @@ export async function postRoutes(fastify) {
 
     const post = serializePost(full.rows[0]);
     broadcast(parentId ? 'REPLY_CREATED' : 'POST_CREATED', post);
+
+    // Notify Discord for top-level tavern posts only (not replies, not entity-linked posts)
+    if (!parentId && !entityType) {
+      notifyPostCreated(post).catch(() => {}); // fire-and-forget, already silent
+    }
+
     return reply.code(201).send(post);
   });
 
