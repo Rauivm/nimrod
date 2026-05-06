@@ -56,16 +56,19 @@ export default function LgpdConsentModal() {
 
         <button
           className="lgpd-accept-btn"
-          onClick={() => {
+          onClick={async () => {
             localStorage.setItem('lgpd_seen', 'true');
-            accept();
-            window.location.reload();
+
+            try {
+              await accept();
+            } finally {
+              window.location.reload();
+            }
           }}
           disabled={loading}
         >
           {loading ? 'Aguarde...' : 'Aceitar e Continuar'}
         </button>
-      </div>
 
       <style>{`
         .lgpd-overlay {
