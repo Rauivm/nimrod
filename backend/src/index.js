@@ -42,7 +42,7 @@ await fastify.register(websocket);
 await fastify.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
  
 await fastify.register(staticFiles, {
-  root: join(process.cwd(), UPLOADS_DIR),
+  root: UPLOADS_DIR,
   prefix: '/uploads/',
 });
  
@@ -64,48 +64,56 @@ fastify.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
 // for WebSocket upgrade requests in @fastify/websocket.
 fastify.register(async function wsPlugin(app) {
   app.get('/ws', { websocket: true }, async (connection, req) => {
-    const socket = connection.socket ?? connection; // v8 compat
- 
-    // Run auth inline — req.user is NOT set by the global hook here.
-    const fakeReply = { code: () => fakeReply, send: () => fakeReply };
+    const socket = connection.socket;
+
     try {
-      await cfAuthMiddleware(req, fakeReply);
-    } catch {}
- 
-    if (!req.user) {
-      socket.send(JSON.stringify({ type: 'ERROR', error: 'Unauthorized' }));
+      await cfAuthMiddleware(req);
+
+      if (!req.user) {
+        socket.close(1008, 'Unauthorized');
+        return;
+      }
+
+      registerClient(socket, req.user.id);
+
+      socket.send(JSON.stringify({
+        type: 'CONNECTED',
+        ts: Date.now(),
+      }));
+    } catch (err) {
       socket.close(1008, 'Unauthorized');
-      return;
     }
- 
-    registerClient(socket, req.user.id);
-    socket.send(JSON.stringify({ type: 'CONNECTED', ts: Date.now() }));
   });
 });
  
 // ── Global preHandler: auth + LGPD guard ──────────────────────────────────────
-fastify.addHook('preHandler', async (req, reply) => {
-  // Skip truly public paths — use raw URL comparison, not req.routerPath.
-  if (matchesPath(req, '/health', '/config')) return;
- 
+fastify.addHook('onRequest', async (req, reply) => {
+  // Public routes
+  if (matchesPath(req, '/health', '/config', '/ws')) return;
+
   // Authenticate
   await cfAuthMiddleware(req, reply);
+
   if (reply.sent || !req.user) return;
- 
-  // LGPD guard — /me and /me/consent must pass through so the frontend
-  // can render the consent modal and record acceptance.
-  if (matchesPath(req, '/me', '/me/consent', '/me/display-name')) return;
- 
-  // In dev mode (DEV_USER_EMAIL set) bypass consent check entirely.
+
+  // Allow bootstrap endpoints
+  if (matchesPath(req, '/me', '/me/consent', '/me/display-name')) {
+    return;
+  }
+
+  // Dev bypass
   if (process.env.DEV_USER_EMAIL?.trim()) return;
- 
+
+  // LGPD guard
   if (!req.user.lgpd_consent) {
     return reply.code(403).send({
       error: 'LGPD consent required',
-      code:  'LGPD_REQUIRED',
+      code: 'LGPD_REQUIRED',
     });
   }
 });
+
+
  
 // ── Authenticated routes ──────────────────────────────────────────────────────
 await fastify.register(userRoutes);

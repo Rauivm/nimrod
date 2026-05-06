@@ -30,7 +30,7 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
   });
 
   // ── Auth decoration ───────────────────────────────────────────────────────
-  fastify.addHook('preHandler', async (req) => {
+/*   fastify.addHook('preHandler', async (req) => {
     if (mockUser) {
       req.user = mockUser;
       return;
@@ -55,7 +55,7 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
 
     req.user = { email };
   });
-
+ */
   // ── DB + service wiring ───────────────────────────────────────────────────
   // mockDb must be pool-shaped: { query, connect? }.
   // resolveFoundryMapping receives the pool directly so tests can inject it.
