@@ -56,19 +56,31 @@ export default function App() {
     <>
       <RoleSyncBridge />
 
-      {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
-      {needsConsent  && <LgpdConsentModal />}
-      {needsName     && <ChooseNameModal />}
+      {!splashDone && (
+        <SplashScreen onDone={() => setSplashDone(true)} />
+      )}
 
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<HomePage />} />
-          <Route path="missions" element={<MissionsPage />} />
-          <Route path="cemetery" element={<CemeteryPage />} />
-          <Route path="maps" element={<MapsPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
+      {loading && splashDone && <LoadingScreen />}
+
+      {needsConsent && <LgpdConsentModal />}
+
+      {needsName && <ChooseNameModal />}
+
+      {!loading &&
+        splashDone &&
+        user &&
+        user.lgpdConsent &&
+        user.displayName && (
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<HomePage />} />
+              <Route path="missions" element={<MissionsPage />} />
+              <Route path="cemetery" element={<CemeteryPage />} />
+              <Route path="maps" element={<MapsPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+          </Routes>
+        )}
     </>
   );
 }
