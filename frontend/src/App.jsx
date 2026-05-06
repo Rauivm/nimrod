@@ -42,7 +42,7 @@ export default function App() {
   const { user, loading } = useAuth();
   const [splashDone, setSplashDone] = useState(false);
 
-  if (loading && splashDone) return <LoadingScreen />;
+  //if (loading && splashDone) return <LoadingScreen />;
 
   // Blocking gates — resolved in strict order:
   //   1. Splash animation
@@ -72,16 +72,7 @@ export default function App() {
         color: 'white',
         zIndex: 999999,
       }}>
-        DEBUG APP
       </div>
-
-      {console.log({
-        loading,
-        splashDone,
-        user,
-        consent: user?.lgpdConsent,
-        displayName: user?.displayName,
-      })}
 
       {!loading && splashDone && (
           <Routes>

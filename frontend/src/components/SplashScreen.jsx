@@ -31,6 +31,14 @@ export default function SplashScreen({ onDone }) {
   }, []);
 
   useEffect(() => {
+    const fallback = setTimeout(() => {
+      onDone?.();
+    }, 5000);
+
+    return () => clearTimeout(fallback);
+  }, [onDone]);
+
+  useEffect(() => {
     const t1 = setTimeout(() => setTitleVisible(true),    300);
     const t2 = setTimeout(() => setSubtitleVisible(true), 800);
     const t3 = setTimeout(() => setPhase('run'),         1200);
