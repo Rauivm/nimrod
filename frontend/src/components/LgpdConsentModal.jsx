@@ -69,6 +69,7 @@ export default function LgpdConsentModal() {
         >
           {loading ? 'Aguarde...' : 'Aceitar e Continuar'}
         </button>
+      </div>
 
       <style>{`
         .lgpd-overlay {
