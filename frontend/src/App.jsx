@@ -49,8 +49,17 @@ export default function App() {
   //   2. LGPD consent
   //   3. Display name selection (first login)
   //   4. App
-  const needsConsent  = !loading && splashDone && user;
-  const needsName     = !loading && splashDone && user && !user.displayName;
+  const showConsentModal =
+    !loading &&
+    splashDone &&
+    user &&
+    !localStorage.getItem('lgpd_seen');
+
+  const needsName =
+    !loading &&
+    splashDone &&
+    user &&
+    !user.displayName;
 
   return (
     <>
@@ -62,7 +71,7 @@ export default function App() {
 
       {loading && splashDone && <LoadingScreen />}
 
-      {needsConsent && <LgpdConsentModal />}
+      {showConsentModal && <LgpdConsentModal />}
       {needsName && <ChooseNameModal />}
 
       <div style={{
