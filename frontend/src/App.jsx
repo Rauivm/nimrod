@@ -63,14 +63,27 @@ export default function App() {
       {loading && splashDone && <LoadingScreen />}
 
       {needsConsent && <LgpdConsentModal />}
-
       {needsName && <ChooseNameModal />}
 
-      {!loading &&
-        splashDone &&
-        user &&
-        user.lgpdConsent &&
-        user.displayName && (
+      <div style={{
+        position: 'fixed',
+        top: 10,
+        left: 10,
+        color: 'white',
+        zIndex: 999999,
+      }}>
+        DEBUG APP
+      </div>
+
+      {console.log({
+        loading,
+        splashDone,
+        user,
+        consent: user?.lgpdConsent,
+        displayName: user?.displayName,
+      })}
+
+      {!loading && splashDone && (
           <Routes>
             <Route path="/" element={<Layout />}>
               <Route index element={<HomePage />} />
