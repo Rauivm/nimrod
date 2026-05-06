@@ -107,7 +107,7 @@ function serializeMe(u) {
     email:       maskEmail(u.email),
     role:        u.role,
     displayName: u.display_name ?? null,   // null = needs first-login modal
-    lgpdConsent: u.lgpd_consent ?? false,
+    lgpdConsent: u.lgpd_consent ?? true, // default to true for legacy users --- IGNORE ---
   };
 }
 
