@@ -29,7 +29,32 @@ export async function userRoutes(fastify) {
 
   // ── PATCH /me  (legacy / general update, kept for compat) ─────────────────
   fastify.patch('/me', async (req, reply) => {
-    return reply.redirect(307, '/me/display-name');
+    const raw = req.body?.displayName ?? req.body?.name ?? '';
+    const displayName = raw.trim() || pickFallbackName();
+
+    if (displayName.length > 40) {
+      return reply.code(400).send({
+        error: 'displayName max 40 chars',
+      });
+    }
+
+    const res = await query(
+      `UPDATE users
+      SET display_name = $1,
+          name = $1
+      WHERE id = $2
+      RETURNING *`,
+      [displayName, req.user.id],
+    );
+
+    const u = res.rows[0];
+
+    broadcast('DISPLAY_NAME_UPDATED', {
+      userId: u.id,
+      displayName: u.display_name,
+    });
+
+    return serializeMe(u);
   });
 
   // ── POST /me/consent ──────────────────────────────────────────────────────
