@@ -49,8 +49,8 @@ export default function App() {
   //   2. LGPD consent
   //   3. Display name selection (first login)
   //   4. App
-  const needsConsent  = !loading && splashDone && user && !user.lgpdConsent;
-  const needsName     = !loading && splashDone && user && user.lgpdConsent && !user.displayName;
+  const needsConsent  = !loading && splashDone && user;
+  const needsName     = !loading && splashDone && user && !user.displayName;
 
   return (
     <>
