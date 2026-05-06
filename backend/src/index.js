@@ -104,13 +104,13 @@ fastify.addHook('onRequest', async (req, reply) => {
   // Dev bypass
   if (process.env.DEV_USER_EMAIL?.trim()) return;
 
-  // LGPD guard
+/*   // LGPD guard
   if (!req.user.lgpd_consent) {
     return reply.code(403).send({
       error: 'LGPD consent required',
       code: 'LGPD_REQUIRED',
     });
-  }
+  } */
 });
 
 
