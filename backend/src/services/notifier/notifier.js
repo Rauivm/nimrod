@@ -22,7 +22,7 @@ const COLOUR = {
   poll:    0x5555CC,  // indigo  — poll created
 };
 
-const FOUNDRY_URL = () => process.env.FOUNDRY_URL?.replace(/\/$/, '') || null;
+const FOUNDRY_URL = () => process.env.MISSIONS_URL?.replace(/\/$/, '') || null;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -66,7 +66,7 @@ export async function notifyMissionCreated(mission) {
     });
   }
 
-  const url = FOUNDRY_URL();
+  const url = MISSIONS_URL();
 
   void sendDiscordMessage({
     embeds: [{
