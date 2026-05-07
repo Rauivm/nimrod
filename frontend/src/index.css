@@ -3,8 +3,13 @@
   --bg-elevated: #111009;
   --bg-card: #16140f;
   --bg-card-hover: #1d1a13;
+  --bg-field: #211e17;
+  --bg-field-focus: #272318;
+  --bg-modal: #17140e;
+  --bg-soft: #1c1912;
   --border: #2a2518;
   --border-bright: #3d3520;
+  --border-field: #4a3d24;
 
   --text: #e8dfc8;
   --text-muted: #8a7d62;
@@ -13,8 +18,8 @@
   --gold: #c9a84c;
   --gold-bright: #e8c56a;
   --gold-dim: #7a6430;
-  --crimson: #8b2020;
-  --crimson-bright: #c43030;
+  --crimson: #7d2424;
+  --crimson-bright: #a63a34;
   --emerald: #1a5c3a;
   --emerald-bright: #2a8a58;
 
@@ -44,6 +49,7 @@ body {
   background-image:
     radial-gradient(ellipse at 20% 0%, rgba(201,168,76,0.04) 0%, transparent 50%),
     radial-gradient(ellipse at 80% 100%, rgba(139,32,32,0.04) 0%, transparent 50%);
+  overflow-x: hidden;
 }
 
 /* Scrollbar */
@@ -61,27 +67,38 @@ button {
   border: none;
   outline: none;
   transition: all 0.15s ease;
+  touch-action: manipulation;
 }
 
 input, textarea, select {
   font-family: var(--font-body);
-  background: var(--bg);
+  background: var(--bg-field);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-field);
   border-radius: var(--radius);
-  padding: 8px 12px;
+  padding: 10px 12px;
   font-size: 15px;
-  transition: border-color 0.15s;
+  line-height: 1.35;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
   width: 100%;
 }
 
 input:focus, textarea:focus, select:focus {
   outline: none;
+  background: var(--bg-field-focus);
   border-color: var(--gold-dim);
-  box-shadow: 0 0 0 2px rgba(201,168,76,0.1);
+  box-shadow: 0 0 0 2px rgba(201,168,76,0.14);
 }
 
+input::placeholder, textarea::placeholder { color: #a69572; opacity: 0.78; }
+
+select { color-scheme: dark; }
+
 textarea { resize: vertical; min-height: 80px; }
+
+@media (max-width: 640px) {
+  input, textarea, select { font-size: 16px; padding: 11px 12px; }
+}
 
 /* Utility */
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { memo, useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { Flower, Plus, Trash2, X } from 'lucide-react';
@@ -12,7 +12,9 @@ function getTributeIcon(count) {
   return { icon: '👑👑👑', label: 'Três Coroas' };
 }
 
-function CharacterCard({ char, onUpdate }) {
+const PAGE_SIZE = 30;
+
+const CharacterCard = memo(function CharacterCard({ char, onUpdate }) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const tribute = getTributeIcon(char.tribute_count);
@@ -20,8 +22,8 @@ function CharacterCard({ char, onUpdate }) {
   const payTribute = async () => {
     setLoading(true);
     try {
-      await api.post(`/cemetery/${char.id}/tribute`, {});
-      onUpdate?.();
+      const updated = await api.post(`/cemetery/${char.id}/tribute`, {});
+      onUpdate?.({ ...char, ...updated, tributed_by_me: !char.tributed_by_me });
     } catch (e) { alert(e.message); }
     setLoading(false);
   };
@@ -102,7 +104,7 @@ function CharacterCard({ char, onUpdate }) {
       `}</style>
     </div>
   );
-}
+});
 
 function CreateCharModal({ onClose, onCreated }) {
   const [form, setForm] = useState({ name: '', description: '' });
@@ -120,7 +122,7 @@ function CreateCharModal({ onClose, onCreated }) {
   };
 
   return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay" role="presentation">
       <div className="modal animate-in">
         <div className="modal-header">
           <h2>🪦 Adicionar ao Cemitério</h2>
@@ -144,11 +146,11 @@ function CreateCharModal({ onClose, onCreated }) {
       <style>{`
         .modal-overlay {
           position: fixed; inset: 0; z-index: 200;
-          background: rgba(0,0,0,0.8); backdrop-filter: blur(4px);
+          background: rgba(0,0,0,0.78); backdrop-filter: blur(4px);
           display: flex; align-items: center; justify-content: center; padding: 24px;
         }
         .modal {
-          background: var(--bg-elevated); border: 1px solid var(--border-bright);
+          background: var(--bg-modal); border: 1px solid var(--border-bright);
           border-radius: var(--radius-lg); padding: 24px;
           width: 100%; max-width: 440px;
           box-shadow: var(--shadow-lg);
@@ -174,14 +176,25 @@ function CreateCharModal({ onClose, onCreated }) {
 
 export default function CemeteryPage() {
   const [characters, setCharacters] = useState([]);
+  const charactersRef = useRef([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const data = await api.get('/cemetery').catch(() => []);
-    setCharacters(data);
-    setLoading(false);
+  useEffect(() => { charactersRef.current = characters; }, [characters]);
+
+  const load = useCallback(async ({ append = false } = {}) => {
+    append ? setLoadingMore(true) : setLoading(true);
+    const offset = append ? charactersRef.current.length : 0;
+    const data = await api.get(`/cemetery?limit=${PAGE_SIZE}&offset=${offset}`).catch(() => []);
+    setHasMore(data.length === PAGE_SIZE);
+    setCharacters(prev => append ? [...prev, ...data.filter(c => !prev.some(existing => existing.id === c.id))] : data);
+    append ? setLoadingMore(false) : setLoading(false);
+  }, []);
+
+  const updateCharacter = useCallback((updated) => {
+    setCharacters(prev => prev.map(c => c.id === updated.id ? updated : c));
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -213,9 +226,14 @@ export default function CemeteryPage() {
             <span>🕊️ Nenhum herói aqui... por enquanto.</span>
           </div>
         ) : (
-          characters.map(c => <CharacterCard key={c.id} char={c} onUpdate={load} />)
+          characters.map(c => <CharacterCard key={c.id} char={c} onUpdate={updateCharacter} />)
         )}
       </div>
+      {!loading && hasMore && (
+        <button className="load-more-btn" onClick={() => load({ append: true })} disabled={loadingMore}>
+          {loadingMore ? 'Carregando...' : 'Carregar mais'}
+        </button>
+      )}
 
       {showCreate && <CreateCharModal onClose={() => setShowCreate(false)} onCreated={load} />}
 
@@ -246,6 +264,15 @@ export default function CemeteryPage() {
           border: 1px dashed var(--border); border-radius: var(--radius-lg);
           font-style: italic;
         }
+        .load-more-btn {
+          margin: 14px auto 0; display: flex; align-items: center; justify-content: center;
+          background: transparent; color: var(--text-muted);
+          border: 1px solid var(--border); border-radius: var(--radius);
+          padding: 8px 18px; font-family: var(--font-display);
+          font-size: 12px; letter-spacing: 0.8px; text-transform: uppercase;
+        }
+        .load-more-btn:hover:not(:disabled) { color: var(--gold); border-color: var(--gold-dim); }
+        .load-more-btn:disabled { opacity: 0.5; }
       `}</style>
     </div>
   );

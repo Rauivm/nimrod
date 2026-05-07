@@ -196,7 +196,11 @@ export default function Layout() {
         @media (max-width: 768px) {
           .brand-sub, .role-label { display: none; }
           .nav-link span { display: none; }
-          .header-inner { gap: 12px; padding: 0 12px; }
+          .header-inner { gap: 8px; padding: 0 10px; overflow-x: auto; }
+          .brand-name { font-size: 14px; letter-spacing: 2px; }
+          .main-nav { flex: 0 0 auto; }
+          .nav-link { padding: 8px; }
+          .header-right { gap: 8px; }
           .foundry-btn span { display: none; }
           .user-chip-name { max-width: 80px; }
           .site-main { padding: 16px 12px; }

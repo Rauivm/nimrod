@@ -3,6 +3,7 @@ import { createWriteStream, mkdirSync } from 'fs';
 import { join, extname } from 'path';
 import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
+import { assertRateLimit } from '../middleware/rateLimit.js';
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
 mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -10,19 +11,23 @@ mkdirSync(UPLOADS_DIR, { recursive: true });
 export async function cemeteryRoutes(fastify) {
   // GET /cemetery
   fastify.get('/cemetery', async (req) => {
+    const limit = Math.min(parseInt(req.query.limit) || 30, 60);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
     const res = await query(
       `SELECT c.*, u.name as owner_name,
               EXISTS(SELECT 1 FROM character_tributes ct WHERE ct.character_id = c.id AND ct.user_id = $1) as tributed_by_me
        FROM characters c
        LEFT JOIN users u ON u.id = c.owner_id
-       ORDER BY c.tribute_count DESC, c.created_at DESC`,
-      [req.user.id]
+       ORDER BY c.tribute_count DESC, c.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [req.user.id, limit, offset]
     );
     return res.rows;
   });
 
   // POST /cemetery - multipart: name, description, image (optional)
   fastify.post('/cemetery', async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'cemetery:create', { limit: 8, windowMs: 60_000 })) return reply;
     let name, description, imageUrl;
 
     const contentType = req.headers['content-type'] || '';
@@ -59,6 +64,7 @@ export async function cemeteryRoutes(fastify) {
 
   // POST /cemetery/:id/tribute
   fastify.post('/cemetery/:id/tribute', async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'cemetery:tribute', { limit: 60, windowMs: 60_000 })) return reply;
     const { id } = req.params;
 
     const exists = await query(

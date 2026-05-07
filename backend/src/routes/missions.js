@@ -1,6 +1,45 @@
 import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
 import { notifyMissionCreated, notifyNoticeCreated } from '../services/notifier/notifier.js';
+import { assertRateLimit } from '../middleware/rateLimit.js';
+
+function currentDateValue() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function isValidDateValue(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const dt = new Date(year, month - 1, day);
+  return dt.getFullYear() === year && dt.getMonth() === month - 1 && dt.getDate() === day;
+}
+
+function isValidTimeValue(value) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function normalizeMissionDateTime({ datetime, date, time }) {
+  let resolvedDate = String(date || '').trim();
+  let resolvedTime = String(time || '').trim();
+
+  if (datetime && (!resolvedDate || !resolvedTime)) {
+    const match = String(datetime).trim().match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::\d{2})?$/);
+    if (!match) throw new Error('datetime must use YYYY-MM-DDTHH:MM');
+    resolvedDate ||= match[1];
+    resolvedTime ||= match[2];
+  }
+
+  resolvedDate ||= currentDateValue();
+  resolvedTime ||= '20:00';
+
+  if (!isValidDateValue(resolvedDate)) throw new Error('date must use a valid YYYY-MM-DD value');
+  if (!isValidTimeValue(resolvedTime)) throw new Error('time must use a valid HH:MM value');
+
+  return `${resolvedDate}T${resolvedTime}`;
+}
 
 async function getMissionWithCounts(missionId, userId) {
   const res = await query(
@@ -69,7 +108,8 @@ async function getPollForMission(pollId, userId) {
 export async function missionRoutes(fastify) {
   // GET /missions
   fastify.get('/missions', async (req) => {
-    const { status, kind } = req.query;
+    const { status, kind, before } = req.query;
+    const limit = Math.min(parseInt(req.query.limit) || 30, 60);
     let sql = `
       SELECT m.*,
              COALESCE(u.display_name, u.name) AS creator_name,
@@ -87,9 +127,11 @@ export async function missionRoutes(fastify) {
 
     if (status) { params.push(status.toUpperCase()); where.push(`m.status = $${params.length}`); }
     if (kind)   { params.push(kind.toUpperCase());   where.push(`m.kind = $${params.length}`); }
+    if (before) { params.push(before); where.push(`m.created_at < $${params.length}`); }
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
 
-    sql += ' GROUP BY m.id, u.id, u.name, u.display_name ORDER BY m.created_at DESC';
+    params.push(limit);
+    sql += ` GROUP BY m.id, u.id, u.name, u.display_name ORDER BY m.created_at DESC LIMIT $${params.length}`;
     const res = await query(sql, params);
     if (!res.rows.length) return [];
 
@@ -157,11 +199,14 @@ export async function missionRoutes(fastify) {
 
   // POST /missions — kind-aware, datetime optional for NOTICE
   fastify.post('/missions', async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'missions:create', { limit: 6, windowMs: 60_000 })) return reply;
     const {
       kind,
       title,
       description,
       datetime,
+      date,
+      time,
       reward,
       level,
       maxPlayers,
@@ -176,8 +221,13 @@ export async function missionRoutes(fastify) {
 
     const resolvedKind = (kind === 'NOTICE') ? 'NOTICE' : 'MISSION';
 
-    if (resolvedKind === 'MISSION' && !datetime) {
-      return reply.code(400).send({ error: 'datetime is required for missions' });
+    let resolvedDateTime = null;
+    if (resolvedKind === 'MISSION') {
+      try {
+        resolvedDateTime = normalizeMissionDateTime({ datetime, date, time });
+      } catch (err) {
+        return reply.code(400).send({ error: err.message });
+      }
     }
 
     const resolvedMaxPlayers  = parseInt(maxPlayers)  || 4;
@@ -206,7 +256,7 @@ export async function missionRoutes(fastify) {
         resolvedKind,
         title.trim(),
         description.trim(),
-        datetime || null,
+        resolvedDateTime,
         reward?.trim() || null,
         level?.trim()  || null,
         resolvedMaxPlayers,
@@ -220,9 +270,9 @@ export async function missionRoutes(fastify) {
 
     // Notify Discord — split by kind
     if (resolvedKind === 'NOTICE') {
-      notifyNoticeCreated(mission).catch(() => {});
+      notifyNoticeCreated(mission);
     } else {
-      notifyMissionCreated(mission).catch(() => {});
+      notifyMissionCreated(mission);
     }
 
     return reply.code(201).send(mission);
@@ -242,10 +292,22 @@ export async function missionRoutes(fastify) {
 
     const fieldMap = {
       title: 'title', description: 'description',
-      datetime: 'datetime',
       reward: 'reward', level: 'level',
       maxPlayers: 'max_players', maxReserves: 'max_reserves', status: 'status',
     };
+
+    if (req.body.datetime !== undefined || req.body.date !== undefined || req.body.time !== undefined) {
+      try {
+        values.push(normalizeMissionDateTime({
+          datetime: req.body.datetime,
+          date: req.body.date,
+          time: req.body.time,
+        }));
+        updates.push(`datetime = $${values.length}`);
+      } catch (err) {
+        return reply.code(400).send({ error: err.message });
+      }
+    }
 
     for (const [key, col] of Object.entries(fieldMap)) {
       if (req.body[key] !== undefined) {
@@ -280,6 +342,7 @@ export async function missionRoutes(fastify) {
 
   // POST /missions/:id/join
   fastify.post('/missions/:id/join', async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'missions:join', { limit: 20, windowMs: 60_000 })) return reply;
     const { id } = req.params;
     const mission = await query('SELECT * FROM missions WHERE id = $1', [id]);
     if (!mission.rows.length) return reply.code(404).send({ error: 'Mission not found' });
@@ -314,7 +377,7 @@ export async function missionRoutes(fastify) {
 
     const updated = await getMissionWithCounts(id, req.user.id);
     broadcast('MISSION_UPDATED', updated);
-    return { joined: true, type };
+    return { joined: true, type, mission: updated };
   });
 
   // DELETE /missions/:id/join
@@ -323,13 +386,14 @@ export async function missionRoutes(fastify) {
     await query('DELETE FROM mission_participants WHERE mission_id = $1 AND user_id = $2', [id, req.user.id]);
     const updated = await getMissionWithCounts(id, req.user.id);
     broadcast('MISSION_UPDATED', updated);
-    return { left: true };
+    return { left: true, mission: updated };
   });
 
   // POST /missions/:id/invite
   fastify.post('/missions/:id/invite', {
     schema: { body: { type: 'object', required: ['userId'], properties: { userId: { type: 'string' } } } }
   }, async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'missions:invite', { limit: 30, windowMs: 60_000 })) return reply;
     const { id } = req.params;
     const { userId } = req.body;
     const mission = await query('SELECT * FROM missions WHERE id = $1', [id]);
@@ -344,13 +408,14 @@ export async function missionRoutes(fastify) {
     );
     const updated = await getMissionWithCounts(id, req.user.id);
     broadcast('MISSION_UPDATED', updated);
-    return { invited: true };
+    return updated;
   });
 
   // POST /missions/:id/rate
   fastify.post('/missions/:id/rate', {
     schema: { body: { type: 'object', required: ['stars'], properties: { stars: { type: 'integer', minimum: 1, maximum: 5 } } } }
   }, async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'missions:rate', { limit: 20, windowMs: 60_000 })) return reply;
     const { id } = req.params;
     const { stars } = req.body;
     const mission = await query('SELECT status FROM missions WHERE id = $1', [id]);
@@ -376,6 +441,7 @@ export async function missionRoutes(fastify) {
       }
     }
   }, async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'missions:react', { limit: 80, windowMs: 60_000 })) return reply;
     const { id } = req.params;
     const { emoji } = req.body;
 

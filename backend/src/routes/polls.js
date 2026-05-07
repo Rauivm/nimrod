@@ -1,6 +1,7 @@
 import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
 import { notifyPollCreated } from '../services/notifier/notifier.js';
+import { assertRateLimit } from '../middleware/rateLimit.js';
 
 async function getPollWithOptions(pollId, userId) {
   const poll = await query(
@@ -62,6 +63,7 @@ export async function pollRoutes(fastify) {
       },
     },
   }, async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'polls:create', { limit: 8, windowMs: 60_000 })) return reply;
     const { question, options } = req.body;
 
     const pollRes = await query(
@@ -79,7 +81,7 @@ export async function pollRoutes(fastify) {
 
     const full = await getPollWithOptions(poll.id, req.user.id);
     broadcast('POLL_CREATED', full);
-    notifyPollCreated(full).catch(() => {});
+    notifyPollCreated(full);
     return reply.code(201).send(full);
   });
 
@@ -93,6 +95,7 @@ export async function pollRoutes(fastify) {
       },
     },
   }, async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'polls:vote', { limit: 80, windowMs: 60_000 })) return reply;
     const { id } = req.params;
     const { optionId } = req.body;
 

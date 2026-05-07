@@ -3,6 +3,7 @@ import { createWriteStream, mkdirSync } from 'fs';
 import { join, extname } from 'path';
 import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
+import { assertRateLimit } from '../middleware/rateLimit.js';
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
 mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -10,17 +11,21 @@ mkdirSync(UPLOADS_DIR, { recursive: true });
 export async function mapRoutes(fastify) {
   // GET /maps
   fastify.get('/maps', async (req, reply) => {
+    const limit = Math.min(parseInt(req.query.limit) || 30, 60);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
     const res = await query(
       `SELECT m.*, u.name as uploader_name
        FROM maps m JOIN users u ON u.id = m.uploader_id
-       ORDER BY m.created_at DESC`,
-      []
+       ORDER BY m.created_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
     );
     return res.rows;
   });
 
   // POST /maps (GM only)
   fastify.post('/maps', async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'maps:upload', { limit: 8, windowMs: 60_000 })) return reply;
     if (req.user.role !== 'GM') {
       return reply.code(403).send({ error: 'GM only' });
     }

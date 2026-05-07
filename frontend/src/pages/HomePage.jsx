@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useWs } from '../contexts/WsContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -6,6 +6,55 @@ import { PostCard, PostComposer } from '../components/PostCard.jsx';
 import { MissionPoster } from '../components/MissionPoster.jsx';
 import { OnlinePlayersPanel } from '../components/OnlinePlayersPanel.jsx';
 import { ChevronDown, ChevronUp, Plus, X, Layers } from 'lucide-react';
+
+const POSTS_PAGE_SIZE = 20;
+const MISSIONS_PAGE_SIZE = 12;
+
+const MISSION_DESCRIPTION_TEMPLATE = `Descrição: <<Resumo da missão>>
+
+Contrata-se um grupo de aventureiros para se infiltrar nas antigas minas de Erebor.
+
+O objetivo é recuperar a Pedra Arken e o tesouro ancestral de um povo exilado, agora guardado por um "inquilino" perigoso!
+
+Classificação: +12.
+
+Gatilhos:
+
+* Claustrofobia (cavernas)
+* Escuridão
+* Violência contra Criaturas Mágicas
+
+<<>>`;
+
+const todayInputValue = () => {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+};
+
+const sanitizeDateInput = (value) => (
+  String(value).replace(/[^\d-]/g, '').replace(/^(\d{4})\d+/, '$1').slice(0, 10)
+);
+
+const sanitizeTimeInput = (value) => String(value).replace(/[^\d:]/g, '').slice(0, 5);
+
+const isValidDateValue = (value) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const dt = new Date(year, month - 1, day);
+  return dt.getFullYear() === year && dt.getMonth() === month - 1 && dt.getDate() === day;
+};
+
+const isValidTimeValue = (value) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+
+const normalizeMissionDateTime = ({ date, time }) => {
+  const resolvedDate = date?.trim() || todayInputValue();
+  const resolvedTime = time?.trim() || '20:00';
+  if (!isValidDateValue(resolvedDate)) throw new Error('Informe uma data válida no formato AAAA-MM-DD.');
+  if (!isValidTimeValue(resolvedTime)) throw new Error('Informe um horário válido no formato HH:MM.');
+  return `${resolvedDate}T${resolvedTime}`;
+};
 
 // ── Board theme: persisted to localStorage ────────────────────────────────────
 function useBoardTheme() {
@@ -20,47 +69,62 @@ function useBoardTheme() {
   return [theme, toggle];
 }
 
-function CreateMissionModal({ onClose, onCreated }) {
+const CreateMissionModal = memo(function CreateMissionModal({ onClose, onCreated }) {
   const [kind, setKind] = useState('MISSION');
   const [form, setForm] = useState({
-    title: '', description: '',
-    datetime: '', reward: '', level: '', maxPlayers: 4, maxReserves: 2,
+    title: '', description: MISSION_DESCRIPTION_TEMPLATE,
+    date: '', time: '', reward: '', level: '', maxPlayers: 4, maxReserves: 2,
   });
   const [pollEnabled, setPollEnabled] = useState(false);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
   const [loading, setLoading] = useState(false);
 
-  const submit = async (e) => {
+  const submit = useCallback(async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
       const body = { kind, ...form };
       if (kind === 'NOTICE') {
+        delete body.date;
+        delete body.time;
         delete body.datetime;
         delete body.reward;
         delete body.level;
         delete body.maxPlayers;
         delete body.maxReserves;
+      } else {
+        body.date = sanitizeDateInput(form.date);
+        body.time = sanitizeTimeInput(form.time);
+        body.datetime = normalizeMissionDateTime(body);
       }
       if (pollEnabled && pollQuestion.trim() && pollOptions.filter(o => o.trim()).length >= 2) {
         body.pollQuestion = pollQuestion.trim();
         body.pollOptions = pollOptions.filter(o => o.trim());
       }
-      await api.post('/missions', body);
-      onCreated?.();
+      const created = await api.post('/missions', body);
+      onCreated?.(created);
       onClose?.();
     } catch (err) { alert(err.message); }
     setLoading(false);
-  };
+  }, [form, kind, onClose, onCreated, pollEnabled, pollOptions, pollQuestion]);
 
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
-  const setOpt = (i, v) => setPollOptions(opts => opts.map((o, idx) => idx === i ? v : o));
-  const addOpt = () => pollOptions.length < 8 && setPollOptions(o => [...o, '']);
-  const removeOpt = (i) => pollOptions.length > 2 && setPollOptions(o => o.filter((_, idx) => idx !== i));
+  const set = useCallback((k, v) => setForm(p => ({ ...p, [k]: v })), []);
+  const setKindPreservingDescription = useCallback((nextKind) => {
+    setKind(nextKind);
+    setForm(p => {
+      if (nextKind === 'MISSION' && !p.description.trim()) {
+        return { ...p, description: MISSION_DESCRIPTION_TEMPLATE };
+      }
+      return p;
+    });
+  }, []);
+  const setOpt = useCallback((i, v) => setPollOptions(opts => opts.map((o, idx) => idx === i ? v : o)), []);
+  const addOpt = useCallback(() => setPollOptions(o => o.length < 8 ? [...o, ''] : o), []);
+  const removeOpt = useCallback((i) => setPollOptions(o => o.length > 2 ? o.filter((_, idx) => idx !== i) : o), []);
 
   return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay" role="presentation">
       <div className="modal animate-in">
         <div className="modal-header">
           <h2>Novo Aviso / Missão</h2>
@@ -72,12 +136,12 @@ function CreateMissionModal({ onClose, onCreated }) {
           <button
             type="button"
             className={`kind-btn ${kind === 'MISSION' ? 'kind-active' : ''}`}
-            onClick={() => setKind('MISSION')}
+            onClick={() => setKindPreservingDescription('MISSION')}
           >⚔ Missão</button>
           <button
             type="button"
             className={`kind-btn ${kind === 'NOTICE' ? 'kind-active' : ''}`}
-            onClick={() => setKind('NOTICE')}
+            onClick={() => setKindPreservingDescription('NOTICE')}
           >📋 Aviso</button>
         </div>
 
@@ -99,8 +163,26 @@ function CreateMissionModal({ onClose, onCreated }) {
                 <input value={form.level} onChange={e => set('level', e.target.value)} placeholder="Ex: 1–5, Iniciante" />
               </div>
               <div className="form-group">
-                <label>Data e Hora *</label>
-                <input type="datetime-local" value={form.datetime} onChange={e => set('datetime', e.target.value)} required />
+                <label>Data</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={form.date}
+                  onChange={e => set('date', sanitizeDateInput(e.target.value))}
+                  placeholder={todayInputValue()}
+                />
+              </div>
+              <div className="form-group">
+                <label>Hora</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={5}
+                  value={form.time}
+                  onChange={e => set('time', sanitizeTimeInput(e.target.value))}
+                  placeholder="20:00"
+                />
               </div>
             </div>
             <div className="form-group">
@@ -157,8 +239,8 @@ function CreateMissionModal({ onClose, onCreated }) {
       </div>
 
       <style>{`
-        .modal-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.8); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; padding: 24px; }
-        .modal { background: var(--bg-elevated); border: 1px solid var(--border-bright); border-radius: var(--radius-lg); padding: 24px; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow-lg); }
+        .modal-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.78); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; padding: 24px; overscroll-behavior: contain; }
+        .modal { background: var(--bg-modal); border: 1px solid var(--border-bright); border-radius: var(--radius-lg); padding: 24px; width: min(100%, 580px); max-height: min(90vh, 760px); overflow-y: auto; box-shadow: var(--shadow-lg); }
         .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
         .modal-header h2 { font-family: var(--font-display); font-size: 18px; color: var(--gold); letter-spacing: 1px; }
 
@@ -175,17 +257,24 @@ function CreateMissionModal({ onClose, onCreated }) {
         /* Poll builder */
         .poll-toggle-row { display: flex; align-items: center; }
         .poll-toggle-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); cursor: pointer; }
-        .poll-builder { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+        .poll-builder { background: var(--bg-soft); border: 1px solid var(--border-field); border-radius: var(--radius); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
         .add-opt-btn { background: none; border: 1px dashed var(--border); color: var(--text-muted); font-size: 12px; padding: 4px 10px; border-radius: var(--radius); cursor: pointer; transition: all 0.15s; align-self: flex-start; margin-top: 2px; }
         .add-opt-btn:hover { border-color: var(--gold-dim); color: var(--gold); }
 
         .submit-btn { background: var(--crimson); color: #f0d0d0; font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; padding: 10px; border-radius: var(--radius); border: 1px solid rgba(196,48,48,0.3); margin-top: 4px; transition: all 0.15s; }
         .submit-btn:hover:not(:disabled) { background: var(--crimson-bright); }
         .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        @media (max-width: 620px) {
+          .modal-overlay { align-items: flex-start; padding: 10px; }
+          .modal { padding: 16px; max-height: calc(100vh - 20px); }
+          .modal-header h2 { font-size: 16px; }
+          .form-row { grid-template-columns: 1fr; gap: 10px; }
+          .kind-btn, .submit-btn { min-height: 42px; }
+        }
       `}</style>
     </div>
   );
-}
+});
 
 // ── Wood board SVG background (data URI) ─────────────────────────────────────
 // Multi-layer approach: CSS only, no external image needed
@@ -239,40 +328,84 @@ export default function HomePage() {
   const { user } = useAuth();
   const { on } = useWs();
   const [posts, setPosts] = useState([]);
+  const postsRef = useRef([]);
   const [missions, setMissions] = useState([]);
   const [loadingPosts, setLoadingPosts] = useState(true);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const [hasMorePosts, setHasMorePosts] = useState(false);
   const [missionsExpanded, setMissionsExpanded] = useState(false);
   const [showCreateMission, setShowCreateMission] = useState(false);
   const [boardTheme, toggleBoardTheme] = useBoardTheme();
 
-  const loadPosts = useCallback(async () => {
-    setLoadingPosts(true);
-    const data = await api.get('/posts').catch(() => []);
-    setPosts(data);
-    setLoadingPosts(false);
+  useEffect(() => { postsRef.current = posts; }, [posts]);
+
+  const loadPosts = useCallback(async ({ append = false } = {}) => {
+    append ? setLoadingMorePosts(true) : setLoadingPosts(true);
+    const before = append ? postsRef.current.at(-1)?.createdAt : null;
+    const url = `/posts?limit=${POSTS_PAGE_SIZE}${before ? `&before=${encodeURIComponent(before)}` : ''}`;
+    const data = await api.get(url).catch(() => []);
+    setHasMorePosts(data.length === POSTS_PAGE_SIZE);
+    setPosts(prev => append ? [...prev, ...data.filter(p => !prev.some(existing => existing.id === p.id))] : data);
+    append ? setLoadingMorePosts(false) : setLoadingPosts(false);
   }, []);
 
   const loadMissions = useCallback(async () => {
-    const data = await api.get('/missions?status=OPEN').catch(() => []);
+    const data = await api.get(`/missions?status=OPEN&limit=${MISSIONS_PAGE_SIZE}`).catch(() => []);
     setMissions(data);
   }, []);
 
   useEffect(() => { loadPosts(); loadMissions(); }, [loadPosts, loadMissions]);
 
   useEffect(() => {
-    const u1 = on('POST_CREATED',    () => loadPosts());
+    const upsertOpenMission = (mission) => {
+      if (!mission?.id) return;
+      setMissions(prev => {
+        const next = prev.filter(m => m.id !== mission.id);
+        return mission.status === 'OPEN' ? [mission, ...next] : next;
+      });
+    };
+    const u1 = on('POST_CREATED', (post) => {
+      if (!post?.parentId) setPosts(prev => prev.some(p => p.id === post.id) ? prev : [post, ...prev]);
+    });
     const u2 = on('POST_LIKED', ({ postId, likeCount, liked }) => {
       setPosts(prev => prev.map(p => p.id === postId ? { ...p, likeCount, likedByMe: liked } : p));
     });
-    const u3 = on('POST_DELETED',    () => loadPosts());
+    const u3 = on('POST_DELETED', ({ postId }) => {
+      setPosts(prev => prev.filter(p => p.id !== postId));
+    });
     const u7 = on('REPLY_CREATED',   () => {});
-    const u4 = on('MISSION_CREATED', () => loadMissions());
-    const u5 = on('MISSION_UPDATED', () => loadMissions());
-    const u6 = on('MISSION_DELETED', () => loadMissions());
+    const u4 = on('MISSION_CREATED', upsertOpenMission);
+    const u5 = on('MISSION_UPDATED', upsertOpenMission);
+    const u6 = on('MISSION_DELETED', ({ missionId }) => {
+      setMissions(prev => prev.filter(m => m.id !== missionId));
+    });
     return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7?.(); };
-  }, [on, loadPosts, loadMissions]);
+  }, [on]);
 
-  const visibleMissions = missionsExpanded ? missions : missions.slice(0, 3);
+  const handleMissionCreated = useCallback((mission) => {
+    if (!mission?.id || mission.status !== 'OPEN') return;
+    setMissions(prev => {
+      const next = prev.filter(m => m.id !== mission.id);
+      return [mission, ...next];
+    });
+  }, []);
+
+  const handlePostCreated = useCallback((post, replaceId, remove = false) => {
+    if (remove && replaceId) {
+      setPosts(prev => prev.filter(p => p.id !== replaceId));
+      return;
+    }
+    if (!post?.id) return;
+    setPosts(prev => {
+      const withoutPrior = prev.filter(p => p.id !== post.id && p.id !== replaceId);
+      return [post, ...withoutPrior];
+    });
+  }, []);
+
+  const visibleMissions = useMemo(
+    () => missionsExpanded ? missions : missions.slice(0, 3),
+    [missions, missionsExpanded],
+  );
   const isWood = boardTheme === 'wood';
 
   return (
@@ -317,7 +450,7 @@ export default function HomePage() {
 
             <div className="home-poster-grid">
               {visibleMissions.map(m => (
-                <MissionPoster key={m.id} mission={m} onUpdate={loadMissions} />
+                <MissionPoster key={m.id} mission={m} onUpdate={handleMissionCreated} />
               ))}
             </div>
 
@@ -343,7 +476,7 @@ export default function HomePage() {
             )}
           </div>
 
-          <PostComposer onPost={loadPosts} />
+          <PostComposer onPost={handlePostCreated} />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '16px' }}>
             {loadingPosts ? (
@@ -357,6 +490,11 @@ export default function HomePage() {
               posts.map(p => <PostCard key={p.id} post={p} onUpdate={loadPosts} />)
             )}
           </div>
+          {!loadingPosts && hasMorePosts && (
+            <button className="load-more-btn" onClick={() => loadPosts({ append: true })} disabled={loadingMorePosts}>
+              {loadingMorePosts ? 'Carregando...' : 'Carregar mais'}
+            </button>
+          )}
         </section>
       </div>
 
@@ -366,7 +504,7 @@ export default function HomePage() {
       </aside>
 
       {showCreateMission && (
-        <CreateMissionModal onClose={() => setShowCreateMission(false)} onCreated={loadMissions} />
+        <CreateMissionModal onClose={() => setShowCreateMission(false)} onCreated={handleMissionCreated} />
       )}
 
       <style>{`
@@ -459,10 +597,22 @@ export default function HomePage() {
           border: 1px dashed var(--border); border-radius: var(--radius-lg);
           font-style: italic;
         }
+        .load-more-btn {
+          margin: 14px auto 0; display: flex; align-items: center; justify-content: center;
+          background: transparent; color: var(--text-muted);
+          border: 1px solid var(--border); border-radius: var(--radius);
+          padding: 8px 18px; font-family: var(--font-display);
+          font-size: 12px; letter-spacing: 0.8px; text-transform: uppercase;
+        }
+        .load-more-btn:hover:not(:disabled) { color: var(--gold); border-color: var(--gold-dim); }
+        .load-more-btn:disabled { opacity: 0.5; }
 
         @media (max-width: 720px) {
           .home-root { grid-template-columns: 1fr; }
           .home-sidebar { display: none; }
+          .section-header { align-items: stretch; flex-direction: column; gap: 10px; }
+          .section-header > div { width: 100%; flex-wrap: wrap; }
+          .create-btn, .theme-toggle-btn { min-height: 40px; justify-content: center; flex: 1; }
           .home-poster-grid {
             grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
             gap: 24px 14px; padding: 12px 6px 8px;

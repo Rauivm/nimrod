@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { memo, useCallback, useEffect, useState, useMemo } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Users, Calendar, Coins, Edit3, Trash2, X, Check, UserPlus, ChevronDown, ChevronUp, Scroll } from 'lucide-react';
@@ -70,12 +70,26 @@ function ReactionBar({ missionId, reactions = [], onUpdate }) {
 
   const react = async (emoji) => {
     if (loading) return;
+    const previous = reactions;
+    const existing = reactions.find(r => r.emoji === emoji);
+    const next = existing
+      ? reactions
+          .map(r => r.emoji === emoji
+            ? { ...r, count: r.reacted_by_me ? Number(r.count) - 1 : Number(r.count) + 1, reacted_by_me: !r.reacted_by_me }
+            : r)
+          .filter(r => Number(r.count) > 0)
+      : [{ emoji, count: 1, reacted_by_me: true }, ...reactions];
+
     setLoading(true);
     setPicking(false);
+    onUpdate?.(next);
     try {
-      await api.post(`/missions/${missionId}/react`, { emoji });
-      onUpdate?.();
-    } catch (e) { alert(e.message); }
+      const res = await api.post(`/missions/${missionId}/react`, { emoji });
+      onUpdate?.(res.reactions);
+    } catch (e) {
+      onUpdate?.(previous);
+      alert(e.message);
+    }
     setLoading(false);
   };
 
@@ -154,14 +168,19 @@ function InlinePoll({ missionId, poll, onUpdate }) {
 }
 
 // ── Main poster ────────────────────────────────────────────────────────────────
-export function MissionPoster({ mission, onUpdate }) {
+export const MissionPoster = memo(function MissionPoster({ mission: initialMission, onUpdate }) {
   const { user } = useAuth();
+  const [mission, setLocalMission] = useState(initialMission);
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [inviteUsers, setInviteUsers] = useState([]);
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({});
+
+  useEffect(() => {
+    setLocalMission(initialMission);
+  }, [initialMission]);
 
   const rotation = useMemo(() => idToRotation(mission.id), [mission.id]);
 
@@ -189,21 +208,51 @@ export function MissionPoster({ mission, onUpdate }) {
     : 'linear-gradient(90deg, #7a1818 0%, #5a0e0e 50%, #7a1818 100%)';
 
   // Actions
+  const emitMission = useCallback((updated) => {
+    if (updated?.id) {
+      setLocalMission(updated);
+      onUpdate?.(updated);
+    }
+    else onUpdate?.();
+  }, [onUpdate]);
+
   const join = async () => {
+    const previous = mission;
+    setLocalMission(m => ({
+      ...m,
+      user_joined: true,
+      player_count: String((parseInt(m.player_count) || 0) + (playersFull ? 0 : 1)),
+      reserve_count: String((parseInt(m.reserve_count) || 0) + (playersFull ? 1 : 0)),
+    }));
     setLoading(true);
-    try { await api.post(`/missions/${mission.id}/join`, {}); onUpdate?.(); }
-    catch (e) { alert(e.message); }
+    try {
+      const res = await api.post(`/missions/${mission.id}/join`, {});
+      emitMission(res.mission);
+    }
+    catch (e) { setLocalMission(previous); alert(e.message); }
     setLoading(false);
   };
   const leave = async () => {
+    const previous = mission;
+    setLocalMission(m => ({
+      ...m,
+      user_joined: false,
+      player_count: String(Math.max((parseInt(m.player_count) || 0) - 1, 0)),
+    }));
     setLoading(true);
-    try { await api.delete(`/missions/${mission.id}/join`); onUpdate?.(); }
-    catch (e) { alert(e.message); }
+    try {
+      const res = await api.delete(`/missions/${mission.id}/join`);
+      emitMission(res.mission);
+    }
+    catch (e) { setLocalMission(previous); alert(e.message); }
     setLoading(false);
   };
   const setStatus = async (status) => {
     setLoading(true);
-    try { await api.patch(`/missions/${mission.id}`, { status }); onUpdate?.(); }
+    try {
+      const updated = await api.patch(`/missions/${mission.id}`, { status });
+      emitMission(updated);
+    }
     catch (e) { alert(e.message); }
     setLoading(false);
   };
@@ -218,13 +267,25 @@ export function MissionPoster({ mission, onUpdate }) {
     setShowInvite(true);
   };
   const invite = async (userId) => {
-    try { await api.post(`/missions/${mission.id}/invite`, { userId }); onUpdate?.(); setShowInvite(false); }
+    try {
+      const updated = await api.post(`/missions/${mission.id}/invite`, { userId });
+      emitMission(updated);
+      setShowInvite(false);
+    }
     catch (e) { alert(e.message); }
   };
   const saveEdit = async () => {
-    try { await api.patch(`/missions/${mission.id}`, editData); onUpdate?.(); setEditing(false); }
+    try {
+      const updated = await api.patch(`/missions/${mission.id}`, editData);
+      emitMission(updated);
+      setEditing(false);
+    }
     catch (e) { alert(e.message); }
   };
+
+  const updateReactions = useCallback((reactions) => {
+    onUpdate?.({ ...mission, reactions });
+  }, [mission, onUpdate]);
 
   const datetime = mission.datetime ? new Date(mission.datetime) : null;
 
@@ -312,7 +373,7 @@ export function MissionPoster({ mission, onUpdate }) {
         )}
 
         {/* Reaction bar — always visible */}
-        <ReactionBar missionId={mission.id} reactions={mission.reactions} onUpdate={onUpdate} />
+        <ReactionBar missionId={mission.id} reactions={mission.reactions} onUpdate={updateReactions} />
 
         {/* Expand toggle */}
         <button
@@ -661,4 +722,4 @@ export function MissionPoster({ mission, onUpdate }) {
       `}</style>
     </div>
   );
-}
+});

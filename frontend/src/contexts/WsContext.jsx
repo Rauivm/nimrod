@@ -12,10 +12,13 @@ export function WsProvider({ children }) {
 
   const connect = useCallback(() => {
     if (deadRef.current) return;            // stop retrying if unauthorized
+    if (wsRef.current && [WebSocket.OPEN, WebSocket.CONNECTING].includes(wsRef.current.readyState)) return;
+    clearTimeout(timerRef.current);
 
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const url   = `${proto}://${window.location.host}/ws`;
     const ws    = new WebSocket(url);
+    wsRef.current = ws;
 
     ws.onopen = () => {
       retryRef.current = 0;                 // reset backoff on success
@@ -23,6 +26,7 @@ export function WsProvider({ children }) {
     };
 
     ws.onclose = () => {
+      if (wsRef.current === ws) wsRef.current = null;
       setConnected(false);
       if (deadRef.current) return;
       // Exponential backoff: 1s, 2s, 4s, 8s … cap at 30s
@@ -44,14 +48,12 @@ export function WsProvider({ children }) {
           return;
         }
 
-        const handlers = listenersRef.current[msg.type] || [];
+        const handlers = listenersRef.current[msg.type] || new Set();
         handlers.forEach((fn) => fn(msg.data));
-        const allHandlers = listenersRef.current['*'] || [];
+        const allHandlers = listenersRef.current['*'] || new Set();
         allHandlers.forEach((fn) => fn(msg));
       } catch {}
     };
-
-    wsRef.current = ws;
   }, []);
 
   useEffect(() => {
@@ -64,9 +66,11 @@ export function WsProvider({ children }) {
   }, [connect]);
 
   const on = useCallback((type, fn) => {
-    listenersRef.current[type] = [...(listenersRef.current[type] || []), fn];
+    if (!listenersRef.current[type]) listenersRef.current[type] = new Set();
+    listenersRef.current[type].add(fn);
     return () => {
-      listenersRef.current[type] = (listenersRef.current[type] || []).filter((f) => f !== fn);
+      listenersRef.current[type]?.delete(fn);
+      if (listenersRef.current[type]?.size === 0) delete listenersRef.current[type];
     };
   }, []);
 

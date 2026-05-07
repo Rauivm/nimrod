@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { Upload, Download, Trash2, Map } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { optimizeImageFile } from '../lib/imageOptimization.js';
 
 export default function MapsPage() {
   const { user } = useAuth();
@@ -28,16 +29,18 @@ export default function MapsPage() {
     if (!file) return alert('Selecione um arquivo');
 
     setUploading(true);
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('title', uploadForm.title || file.name);
-    fd.append('description', uploadForm.description);
-
     try {
-      await api.uploadMap(fd);
+      const uploadFile = await optimizeImageFile(file);
+      const fd = new FormData();
+      fd.append('file', uploadFile);
+      fd.append('title', uploadForm.title || file.name);
+      fd.append('description', uploadForm.description);
+
+      const created = await api.uploadMap(fd);
       setUploadForm({ title: '', description: '' });
       fileRef.current.value = '';
-      load();
+      const optimisticMap = { ...created, uploader_name: user?.displayName || user?.name || created.uploader_name };
+      setMaps(prev => prev.some(m => m.id === created.id) ? prev : [optimisticMap, ...prev]);
     } catch (e) { alert(e.message); }
     setUploading(false);
   };

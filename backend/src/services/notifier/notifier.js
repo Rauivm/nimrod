@@ -13,7 +13,8 @@
  *   Poll    5592575   (#5555FF purple-blue)
  */
 
-import { sendDiscordMessage } from './discord.js';
+import './worker.js';
+import { enqueueNotification } from './queue.js';
 
 const COLOUR = {
   mission: 0xCC2222,  // crimson — mission created
@@ -22,7 +23,11 @@ const COLOUR = {
   poll:    0x5555CC,  // indigo  — poll created
 };
 
-const FOUNDRY_URL = () => process.env.MISSIONS_URL?.replace(/\/$/, '') || null;
+const MISSIONS_URL = () => process.env.MISSIONS_URL?.replace(/\/$/, '') || null;
+
+function enqueueDiscord(payload) {
+  enqueueNotification({ type: 'discord', payload });
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,7 +53,7 @@ function timestamp() {
  *           reward?: string, datetime?: string,
  *           creator_name: string, id: string }} mission
  */
-export async function notifyMissionCreated(mission) {
+export function notifyMissionCreated(mission) {
   const fields = [];
 
   if (mission.level) {
@@ -68,7 +73,7 @@ export async function notifyMissionCreated(mission) {
 
   const url = MISSIONS_URL();
 
-  void sendDiscordMessage({
+  enqueueDiscord({
     embeds: [{
       title:       `⚔ Nova Missão: ${mission.title}`,
       description: truncate(mission.description),
@@ -78,7 +83,7 @@ export async function notifyMissionCreated(mission) {
       timestamp:   timestamp(),
       ...(url ? { url } : {}),
     }],
-  }).catch(console.error);
+  });
 }
 
 /**
@@ -86,8 +91,8 @@ export async function notifyMissionCreated(mission) {
  *
  * @param {{ title: string, description: string, creator_name: string, id: string }} notice
  */
-export async function notifyNoticeCreated(notice) {
-  void sendDiscordMessage({
+export function notifyNoticeCreated(notice) {
+  enqueueDiscord({
     embeds: [{
       title:       `📋 Novo Aviso: ${notice.title}`,
       description: truncate(notice.description),
@@ -95,7 +100,7 @@ export async function notifyNoticeCreated(notice) {
       footer:      footer(),
       timestamp:   timestamp(),
     }],
-  }).catch(console.error);
+  });
 }
 
 /**
@@ -104,8 +109,8 @@ export async function notifyNoticeCreated(notice) {
  *
  * @param {{ content: string, author: { displayName: string } }} post
  */
-export async function notifyPostCreated(post) {
-  void sendDiscordMessage({
+export function notifyPostCreated(post) {
+  enqueueDiscord({
     embeds: [{
       title:       '📜 Nova mensagem na Taverna',
       description: truncate(post.content, 300),
@@ -115,7 +120,7 @@ export async function notifyPostCreated(post) {
       },
       timestamp: timestamp(),
     }],
-  }).catch(console.error);
+  });
 }
 
 /**
@@ -124,13 +129,13 @@ export async function notifyPostCreated(post) {
  * @param {{ question: string, options: Array<{ text: string }>,
  *           creator_name: string }} poll
  */
-export async function notifyPollCreated(poll) {
+export function notifyPollCreated(poll) {
   const optionList = (poll.options || [])
     .slice(0, 8)
     .map((o, i) => `${i + 1}. ${o.text}`)
     .join('\n');
 
-  void sendDiscordMessage({
+  enqueueDiscord({
     embeds: [{
       title:       `📊 Nova Enquete`,
       description: `**${truncate(poll.question, 200)}**\n\n${optionList}`,
@@ -138,5 +143,5 @@ export async function notifyPollCreated(poll) {
       footer:      footer(),
       timestamp:   timestamp(),
     }],
-  }).catch(console.error);
+  });
 }

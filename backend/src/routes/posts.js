@@ -1,6 +1,7 @@
 import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
 import { notifyPostCreated } from '../services/notifier/notifier.js';
+import { assertRateLimit } from '../middleware/rateLimit.js';
 
 const MAX_DEPTH = 3;
 
@@ -95,6 +96,7 @@ export async function postRoutes(fastify) {
       },
     },
   }, async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'posts:create', { limit: 8, windowMs: 60_000 })) return reply;
     const { content, parentId, entityType, entityId } = req.body;
 
     // Depth guard — prevent infinite nesting
@@ -139,7 +141,7 @@ export async function postRoutes(fastify) {
 
     // Notify Discord for top-level tavern posts only (not replies, not entity-linked posts)
     if (!parentId && !entityType) {
-      notifyPostCreated(post).catch(() => {}); // fire-and-forget, already silent
+      notifyPostCreated(post);
     }
 
     return reply.code(201).send(post);
@@ -147,7 +149,8 @@ export async function postRoutes(fastify) {
 
   // ── POST /posts/:id/like ───────────────────────────────────────────────────
   // Optimistic-safe: returns delta only, no full feed reload needed.
-  fastify.post('/posts/:id/like', async (req) => {
+  fastify.post('/posts/:id/like', async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'posts:like', { limit: 60, windowMs: 60_000 })) return reply;
     const { id } = req.params;
     const exists = await query(
       'SELECT 1 FROM post_likes WHERE post_id = $1 AND user_id = $2',

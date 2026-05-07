@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useWs } from '../contexts/WsContext.jsx';
 import { MissionPoster } from '../components/MissionPoster.jsx';
@@ -14,38 +14,77 @@ const FILTERS = [
 ];
 
 const INITIAL_VISIBLE = 6;
+const MISSIONS_PAGE_SIZE = 30;
 
 export default function MissionsPage() {
   const { on } = useWs();
   const [missions, setMissions] = useState([]);
+  const missionsRef = useRef([]);
   const [filter, setFilter]     = useState(FILTERS[0]);
   const [loading, setLoading]   = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  useEffect(() => { missionsRef.current = missions; }, [missions]);
+
+  const load = useCallback(async ({ append = false } = {}) => {
+    append ? setLoadingMore(true) : setLoading(true);
     let url = '/missions';
     const params = [];
+    params.push(`limit=${MISSIONS_PAGE_SIZE}`);
     if (filter.field === 'status') params.push(`status=${filter.value}`);
     if (filter.field === 'kind')   params.push(`kind=${filter.value}`);
+    if (append && missionsRef.current.length) params.push(`before=${encodeURIComponent(missionsRef.current.at(-1).created_at)}`);
     if (params.length) url += '?' + params.join('&');
     const data = await api.get(url).catch(() => []);
-    setMissions(data);
-    setLoading(false);
+    setHasMore(data.length === MISSIONS_PAGE_SIZE);
+    setMissions(prev => append ? [...prev, ...data.filter(m => !prev.some(existing => existing.id === m.id))] : data);
+    append ? setLoadingMore(false) : setLoading(false);
   }, [filter]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setExpanded(false); }, [filter]);
 
   useEffect(() => {
-    const u1 = on('MISSION_CREATED', load);
-    const u2 = on('MISSION_UPDATED', load);
-    const u3 = on('MISSION_DELETED', load);
+    const matchesFilter = (mission) => {
+      if (!mission?.id) return false;
+      if (filter.field === 'status') return mission.status === filter.value;
+      if (filter.field === 'kind') return mission.kind === filter.value;
+      return true;
+    };
+    const upsert = (mission) => {
+      setMissions(prev => {
+        const next = prev.filter(m => m.id !== mission?.id);
+        return matchesFilter(mission) ? [mission, ...next] : next;
+      });
+    };
+    const u1 = on('MISSION_CREATED', upsert);
+    const u2 = on('MISSION_UPDATED', upsert);
+    const u3 = on('MISSION_DELETED', ({ missionId }) => {
+      setMissions(prev => prev.filter(m => m.id !== missionId));
+    });
     return () => { u1(); u2(); u3(); };
-  }, [on, load]);
+  }, [on, filter]);
 
-  const visible = expanded ? missions : missions.slice(0, INITIAL_VISIBLE);
-  const hasMore = missions.length > INITIAL_VISIBLE;
+  const handleMissionUpdate = useCallback((mission) => {
+    if (!mission?.id) return load();
+    const matches = filter.field === 'status'
+      ? mission.status === filter.value
+      : filter.field === 'kind'
+        ? mission.kind === filter.value
+        : true;
+    setMissions(prev => {
+      const next = prev.filter(m => m.id !== mission.id);
+      return matches ? [mission, ...next] : next;
+    });
+  }, [filter, load]);
+
+  const visible = useMemo(
+    () => expanded ? missions : missions.slice(0, INITIAL_VISIBLE),
+    [expanded, missions],
+  );
+  const hasHidden = missions.length > INITIAL_VISIBLE;
 
   return (
     <div className="missions-page">
@@ -74,14 +113,21 @@ export default function MissionsPage() {
       ) : (
         <>
           <div className="poster-grid">
-            {visible.map(m => <MissionPoster key={m.id} mission={m} onUpdate={load} />)}
+            {visible.map(m => <MissionPoster key={m.id} mission={m} onUpdate={handleMissionUpdate} />)}
           </div>
-          {hasMore && (
+          {hasHidden && (
             <div className="expand-row">
               <button onClick={() => setExpanded(v => !v)} className="expand-btn">
                 {expanded
                   ? <><ChevronUp size={13} /> Recolher</>
                   : <><ChevronDown size={13} /> Ver todos ({missions.length})</>}
+              </button>
+            </div>
+          )}
+          {expanded && hasMore && (
+            <div className="expand-row">
+              <button onClick={() => load({ append: true })} disabled={loadingMore} className="expand-btn">
+                {loadingMore ? 'Carregando...' : 'Carregar mais'}
               </button>
             </div>
           )}

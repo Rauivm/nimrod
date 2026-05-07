@@ -1,7 +1,7 @@
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Heart, Trash2, MessageSquare, CornerDownRight, ChevronDown, ChevronUp } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { memo, useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
@@ -31,7 +31,7 @@ function AuthorChip({ author }) {
   );
 }
 
-export function PostCard({ post: initialPost, onUpdate, depth = 0 }) {
+export const PostCard = memo(function PostCard({ post: initialPost, onUpdate, depth = 0 }) {
   const { user } = useAuth();
   const [localPost, setLocalPost] = useState(initialPost);
   const [liking, setLiking]             = useState(false);
@@ -42,6 +42,10 @@ export function PostCard({ post: initialPost, onUpdate, depth = 0 }) {
   const [loadingReplies, setLoadingReplies] = useState(false);
 
   const post = localPost;
+
+  useEffect(() => {
+    setLocalPost(initialPost);
+  }, [initialPost]);
 
   const like = async () => {
     if (liking) return;
@@ -127,11 +131,23 @@ export function PostCard({ post: initialPost, onUpdate, depth = 0 }) {
         {showReplyBox && (
           <ReplyComposer
             parentId={post.id}
-            onSubmit={async () => {
-              setShowReplyBox(false);
-              await loadReplies();
+            onSubmit={async (reply, replaceId, remove = false) => {
+              if (remove && replaceId) {
+                setReplies(prev => prev.filter(r => r.id !== replaceId));
+                setLocalPost(p => ({ ...p, replyCount: Math.max(Number(p.replyCount || 0) - 1, 0) }));
+                return;
+              }
+              if (reply?.id) {
+                setReplies(prev => {
+                  const withoutPrior = prev.filter(r => r.id !== reply.id && r.id !== replaceId);
+                  return [...withoutPrior, reply];
+                });
+              }
+              if (!replaceId) {
+                setShowReplyBox(false);
+                setLocalPost(p => ({ ...p, replyCount: Number(p.replyCount || 0) + 1 }));
+              }
               setRepliesOpen(true);
-              onUpdate?.();
             }}
             onCancel={() => setShowReplyBox(false)}
           />
@@ -177,20 +193,42 @@ export function PostCard({ post: initialPost, onUpdate, depth = 0 }) {
       `}</style>
     </div>
   );
-}
+});
 
 function ReplyComposer({ parentId, onSubmit, onCancel }) {
+  const { user } = useAuth();
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
     if (!content.trim()) return;
+    const nextContent = content.trim();
+    const tempId = `temp-reply-${Date.now()}`;
+    const optimisticReply = {
+      id: tempId,
+      content: nextContent,
+      parentId,
+      likeCount: 0,
+      likedByMe: false,
+      replyCount: 0,
+      createdAt: new Date().toISOString(),
+      author: {
+        id: user?.id,
+        displayName: user?.displayName || user?.name || 'Aventureiro',
+        role: user?.role,
+      },
+    };
     setLoading(true);
+    setContent('');
+    onSubmit?.(optimisticReply);
     try {
-      await api.post('/posts', { content: content.trim(), parentId });
-      setContent('');
-      onSubmit?.();
-    } catch (e) { alert(e.message); }
+      const post = await api.post('/posts', { content: nextContent, parentId });
+      onSubmit?.(post, tempId);
+    } catch (e) {
+      onSubmit?.(null, tempId, true);
+      setContent(nextContent);
+      alert(e.message);
+    }
     setLoading(false);
   };
 
@@ -220,14 +258,42 @@ function ReplyComposer({ parentId, onSubmit, onCancel }) {
 }
 
 export function PostComposer({ onPost }) {
+  const { user } = useAuth();
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
     if (!content.trim()) return;
+    const nextContent = content.trim();
+    const tempId = `temp-${Date.now()}`;
+    const optimisticPost = {
+      id: tempId,
+      content: nextContent,
+      parentId: null,
+      entityType: null,
+      entityId: null,
+      likeCount: 0,
+      likedByMe: false,
+      replyCount: 0,
+      createdAt: new Date().toISOString(),
+      author: {
+        id: user?.id,
+        displayName: user?.displayName || user?.name || 'Aventureiro',
+        role: user?.role,
+      },
+    };
     setLoading(true);
-    try { await api.post('/posts', { content: content.trim() }); setContent(''); onPost?.(); }
-    catch (e) { alert(e.message); }
+    setContent('');
+    onPost?.(optimisticPost);
+    try {
+      const post = await api.post('/posts', { content: nextContent });
+      onPost?.(post, tempId);
+    }
+    catch (e) {
+      onPost?.(null, tempId, true);
+      setContent(nextContent);
+      alert(e.message);
+    }
     setLoading(false);
   };
 
