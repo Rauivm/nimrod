@@ -68,7 +68,7 @@ export async function notifyMissionCreated(mission) {
 
   const url = FOUNDRY_URL();
 
-  await sendDiscordMessage({
+  void sendDiscordMessage({
     embeds: [{
       title:       `⚔ Nova Missão: ${mission.title}`,
       description: truncate(mission.description),
@@ -78,7 +78,7 @@ export async function notifyMissionCreated(mission) {
       timestamp:   timestamp(),
       ...(url ? { url } : {}),
     }],
-  });
+  }).catch(console.error);
 }
 
 /**
@@ -87,7 +87,7 @@ export async function notifyMissionCreated(mission) {
  * @param {{ title: string, description: string, creator_name: string, id: string }} notice
  */
 export async function notifyNoticeCreated(notice) {
-  await sendDiscordMessage({
+  void sendDiscordMessage({
     embeds: [{
       title:       `📋 Novo Aviso: ${notice.title}`,
       description: truncate(notice.description),
@@ -95,7 +95,7 @@ export async function notifyNoticeCreated(notice) {
       footer:      footer(),
       timestamp:   timestamp(),
     }],
-  });
+  }).catch(console.error);
 }
 
 /**
@@ -105,7 +105,7 @@ export async function notifyNoticeCreated(notice) {
  * @param {{ content: string, author: { displayName: string } }} post
  */
 export async function notifyPostCreated(post) {
-  await sendDiscordMessage({
+  void sendDiscordMessage({
     embeds: [{
       title:       '📜 Nova mensagem na Taverna',
       description: truncate(post.content, 300),
@@ -115,7 +115,7 @@ export async function notifyPostCreated(post) {
       },
       timestamp: timestamp(),
     }],
-  });
+  }).catch(console.error);
 }
 
 /**
@@ -130,7 +130,7 @@ export async function notifyPollCreated(poll) {
     .map((o, i) => `${i + 1}. ${o.text}`)
     .join('\n');
 
-  await sendDiscordMessage({
+  void sendDiscordMessage({
     embeds: [{
       title:       `📊 Nova Enquete`,
       description: `**${truncate(poll.question, 200)}**\n\n${optionList}`,
@@ -138,5 +138,5 @@ export async function notifyPollCreated(poll) {
       footer:      footer(),
       timestamp:   timestamp(),
     }],
-  });
+  }).catch(console.error);
 }
