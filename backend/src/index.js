@@ -18,11 +18,14 @@ import { cemeteryRoutes } from './routes/cemetery.js';
 import { mapRoutes } from './routes/maps.js';
 import { userRoutes, configRoutes } from './routes/users.js';
 import { foundryRoutes } from './routes/foundry.js';
+import { profileRoutes } from './routes/profile.js';
 import { startCemeteryDecay } from './jobs/cemeteryDecay.js';
+import { startFoundrySync } from './services/foundrySync.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
 mkdirSync(UPLOADS_DIR, { recursive: true });
+mkdirSync(join(UPLOADS_DIR, 'avatars'), { recursive: true });
 
 const fastify = Fastify({ logger: true });
 
@@ -71,14 +74,10 @@ fastify.register(async function wsPlugin(app) {
   });
 });
 
-// ── Global auth hook — no LGPD blocking, no display-name blocking ─────────────
+// ── Global auth hook ──────────────────────────────────────────────────────────
 fastify.addHook('onRequest', async (req, reply) => {
   const path = req.url.split('?')[0];
-
-  // Fully public — no auth needed
   if (path === '/health' || path === '/config' || path === '/ws') return;
-
-  // Authenticate every other request
   await cfAuthMiddleware(req, reply);
 });
 
@@ -90,11 +89,13 @@ await fastify.register(pollRoutes);
 await fastify.register(cemeteryRoutes);
 await fastify.register(mapRoutes);
 await fastify.register(foundryRoutes);
+await fastify.register(profileRoutes);
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 try {
   await runMigrations();
   startCemeteryDecay();
+  startFoundrySync();
   await fastify.listen({ port: parseInt(process.env.PORT) || 3001, host: '0.0.0.0' });
   console.log('🎲 foundry-nimrod backend running on port', process.env.PORT || 3001);
 } catch (err) {
