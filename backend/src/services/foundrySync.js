@@ -1,112 +1,164 @@
 /**
  * services/foundrySync.js
  *
- * Reads Foundry VTT's actors.db (NeDB JSONL format) from the filesystem
- * and upserts into player_characters.
+ * Foundry V13+ sync using LevelDB actor storage.
  *
- * Contract:
- *  - NEVER writes to Foundry's database
- *  - NEVER modifies Foundry authentication
- *  - Gracefully no-ops if the file is missing or Foundry is offline
- *  - Idempotent: safe to run multiple times
+ * Compatible with:
+ *   Data/worlds/<world>/data/actors
  *
- * Config (.env):
- *  FOUNDRY_DATA_PATH=/path/to/foundry/Data   (default: ./foundry-data)
- *  FOUNDRY_WORLD=my-world-name               (required for sync)
- *  FOUNDRY_SYSTEM=dnd5e                      (default: dnd5e)
+ * Requirements:
+ *   npm install level
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
 import { join } from 'path';
+import { Level } from 'level';
+
 import { query } from '../db/index.js';
 
 const SYSTEM = process.env.FOUNDRY_SYSTEM || 'dnd5e';
 
 /**
- * Resolve the actors.db path from env.
- * Returns null if not configured or file doesn't exist.
+ * Resolve actors LevelDB directory.
  */
-function getActorsDbPath() {
+function getActorsPath() {
   const dataPath = process.env.FOUNDRY_DATA_PATH;
-  const world    = process.env.FOUNDRY_WORLD;
-  if (!dataPath || !world) return null;
+  const world = process.env.FOUNDRY_WORLD;
 
-  const p = join(dataPath, 'worlds', world, 'data', 'actors.db');
+  if (!dataPath || !world) {
+    return null;
+  }
+
+  const p = join(
+    dataPath,
+    'worlds',
+    world,
+    'data',
+    'actors',
+  );
+
   return existsSync(p) ? p : null;
 }
 
 /**
- * Parse NeDB JSONL — each line is a JSON object or a deletion tombstone.
- * Returns the latest live version of each actor (tombstones remove entries).
+ * Read all actors from Foundry LevelDB.
  */
-function parseActorsDb(filePath) {
-  const raw = readFileSync(filePath, 'utf8');
-  const lines = raw.split('\n').filter(Boolean);
+async function readActorsDb(actorsPath) {
+  const db = new Level(actorsPath, {
+    valueEncoding: 'json',
+    readOnly: true,
+  });
 
-  const map = new Map();
-  for (const line of lines) {
-    try {
-      const doc = JSON.parse(line);
-      if (doc.$$deleted) {
-        map.delete(doc._id);
-      } else {
-        map.set(doc._id, doc);
+  const actors = [];
+
+  await db.open();
+
+  try {
+    const iterator = db.iterator();
+
+    while (true) {
+      const result = await iterator.next();
+
+      if (!result) {
+        break;
       }
-    } catch {
-      // skip malformed lines
+
+      const [key, value] = result;
+
+      if (
+        value &&
+        typeof value === 'object'
+      ) {
+        actors.push(value);
+      }
     }
+
+    await iterator.close();
+
+    return actors;
+  } finally {
+    await db.close();
   }
-  return [...map.values()];
 }
 
 /**
- * Extract level and XP from an actor document.
- * Handles D&D 5e and PF2e shapes. Falls back gracefully.
+ * Extract level/xp safely.
  */
 function extractLevelXp(actor) {
-  const sys = actor.system ?? actor.data ?? {};
+  const sys = actor.system ?? {};
 
-  // D&D 5e
+  // D&D5e
   if (sys.details?.level !== undefined) {
     return {
-      level:   sys.details.level   ?? 1,
-      xp:      sys.details.xp?.value ?? 0,
-      xpNext:  sys.details.xp?.max   ?? 300,
+      level: sys.details.level ?? 1,
+      xp: sys.details?.xp?.value ?? 0,
+      xpNext: sys.details?.xp?.max ?? 300,
     };
   }
 
-  // PF2e
+  // PF2E
   if (sys.details?.level?.value !== undefined) {
-    return { level: sys.details.level.value ?? 1, xp: 0, xpNext: 1000 };
+    return {
+      level: sys.details.level.value ?? 1,
+      xp: 0,
+      xpNext: 1000,
+    };
   }
 
-  return { level: 1, xp: 0, xpNext: 300 };
+  return {
+    level: 1,
+    xp: 0,
+    xpNext: 300,
+  };
 }
 
 /**
- * Sync all PC-type actors from Foundry into player_characters.
- *
- * Only syncs actors of type "character" (PCs). NPCs/monsters are skipped.
- * Existing links (user_id) are never overwritten by the sync.
- *
- * @returns {{ synced: number, skipped: number, error: string|null }}
+ * Sync all player characters from Foundry.
  */
 export async function syncFoundryActors() {
-  const dbPath = getActorsDbPath();
-  if (!dbPath) {
-    return { synced: 0, skipped: 0, error: 'FOUNDRY_DATA_PATH or FOUNDRY_WORLD not configured' };
+  const actorsPath = getActorsPath();
+
+  if (!actorsPath) {
+    return {
+      synced: 0,
+      skipped: 0,
+      error: 'Foundry actors path not found',
+    };
   }
 
-  let actors;
+  console.log('[foundrySync] Actors path:', actorsPath);
+
+  let actors = [];
+
   try {
-    actors = parseActorsDb(dbPath);
+    actors = await readActorsDb(actorsPath);
   } catch (err) {
-    return { synced: 0, skipped: 0, error: `Failed to read actors.db: ${err.message}` };
+    console.error('[foundrySync] Failed reading LevelDB:', err);
+
+    return {
+      synced: 0,
+      skipped: 0,
+      error: err.message,
+    };
   }
 
-  // Only player characters
-  const pcs = actors.filter(a =>
-    (a.type === 'character' || a.type === 'PC') && a.name
+  console.log('[foundrySync] Total actors loaded:', actors.length);
+
+  const pcs = actors.filter(actor => {
+    return (
+      actor &&
+      actor.name &&
+      (
+        actor.type === 'character' ||
+        actor.type === 'Character' ||
+        actor.type === 'PC'
+      )
+    );
+  });
+
+  console.log(
+    '[foundrySync] Player characters:',
+    pcs.map(a => a.name),
   );
 
   let synced = 0;
@@ -116,62 +168,120 @@ export async function syncFoundryActors() {
     try {
       const { level, xp, xpNext } = extractLevelXp(actor);
 
-      const tokenImg   = actor.prototypeToken?.texture?.src ?? actor.token?.img ?? null;
-      const portraitImg = actor.img ?? null;
-      const biography  = actor.system?.details?.biography?.value
-        ?? actor.data?.details?.biography?.value
-        ?? null;
+      const tokenImg =
+        actor.prototypeToken?.texture?.src ??
+        actor.token?.img ??
+        null;
+
+      const portraitImg =
+        actor.img ?? null;
+
+      const biography =
+        actor.system?.details?.biography?.value ??
+        null;
 
       await query(
-        `INSERT INTO player_characters
-           (foundry_actor_id, name, level, xp, xp_next, token_img, portrait_img, biography, system, last_synced_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-         ON CONFLICT (foundry_actor_id) DO UPDATE
-           SET name           = EXCLUDED.name,
-               level          = EXCLUDED.level,
-               xp             = EXCLUDED.xp,
-               xp_next        = EXCLUDED.xp_next,
-               token_img      = EXCLUDED.token_img,
-               portrait_img   = EXCLUDED.portrait_img,
-               biography      = EXCLUDED.biography,
-               last_synced_at = NOW(),
-               updated_at     = NOW()
-           -- NEVER overwrite user_id or retired status from sync`,
-        [actor._id, actor.name, level, xp, xpNext, tokenImg, portraitImg, biography, SYSTEM],
+        `
+        INSERT INTO player_characters (
+          foundry_actor_id,
+          name,
+          level,
+          xp,
+          xp_next,
+          token_img,
+          portrait_img,
+          biography,
+          system,
+          last_synced_at
+        )
+        VALUES (
+          $1, $2, $3, $4, $5,
+          $6, $7, $8, $9, NOW()
+        )
+        ON CONFLICT (foundry_actor_id)
+        DO UPDATE SET
+          name            = EXCLUDED.name,
+          level           = EXCLUDED.level,
+          xp              = EXCLUDED.xp,
+          xp_next         = EXCLUDED.xp_next,
+          token_img       = EXCLUDED.token_img,
+          portrait_img    = EXCLUDED.portrait_img,
+          biography       = EXCLUDED.biography,
+          last_synced_at  = NOW(),
+          updated_at      = NOW()
+        `,
+        [
+          actor._id,
+          actor.name,
+          level,
+          xp,
+          xpNext,
+          tokenImg,
+          portraitImg,
+          biography,
+          SYSTEM,
+        ],
       );
+
+      console.log(
+        `[foundrySync] Synced actor: ${actor.name}`
+      );
+
       synced++;
     } catch (err) {
-      console.error(`[foundrySync] Failed to upsert actor ${actor._id}:`, err.message);
+      console.error(
+        `[foundrySync] Failed actor ${actor.name}:`,
+        err.message,
+      );
+
       skipped++;
     }
   }
 
-  console.log(`[foundrySync] Sync complete: ${synced} synced, ${skipped} skipped`);
-  return { synced, skipped, error: null };
+  console.log(
+    `[foundrySync] Sync complete: ${synced} synced, ${skipped} skipped`
+  );
+
+  return {
+    synced,
+    skipped,
+    error: null,
+  };
 }
 
 /**
- * Start the periodic sync job (runs every 5 minutes).
- * Safe to call at startup — exits silently if not configured.
+ * Periodic sync job.
  */
 export function startFoundrySync() {
-  const configured = !!(process.env.FOUNDRY_DATA_PATH && process.env.FOUNDRY_WORLD);
+  const configured =
+    !!process.env.FOUNDRY_DATA_PATH &&
+    !!process.env.FOUNDRY_WORLD;
+
   if (!configured) {
-    console.log('[foundrySync] Not configured — skipping auto-sync (set FOUNDRY_DATA_PATH + FOUNDRY_WORLD to enable)');
+    console.log(
+      '[foundrySync] Not configured'
+    );
+
     return;
   }
 
-  // Initial sync at startup
-  syncFoundryActors().catch(err =>
-    console.error('[foundrySync] Initial sync failed:', err.message)
-  );
-
-  // Periodic sync every 5 minutes
-  setInterval(() => {
-    syncFoundryActors().catch(err =>
-      console.error('[foundrySync] Periodic sync failed:', err.message)
+  syncFoundryActors().catch(err => {
+    console.error(
+      '[foundrySync] Initial sync failed:',
+      err.message,
     );
+  });
+
+  setInterval(() => {
+    syncFoundryActors().catch(err => {
+      console.error(
+        '[foundrySync] Periodic sync failed:',
+        err.message,
+      );
+    });
   }, 5 * 60 * 1000);
 
-  console.log('[foundrySync] Auto-sync started (every 5 min)');
+  console.log(
+    '[foundrySync] Auto-sync started'
+  );
 }

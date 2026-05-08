@@ -32,7 +32,7 @@ services:
       NODE_ENV: production
       UPLOADS_DIR: /app/uploads
     volumes:
-      - "/c/Users/rauiv/AppData/Local/FoundryVTT/Data:/foundrydata/Data:ro"
+      - "/c/Users/rauiv/AppData/Local/FoundryVTT/Data:/foundrydata/Data"
       - uploads:/app/uploads
     ports:
       - "3001:3001"
