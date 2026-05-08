@@ -109,3 +109,118 @@ export async function cemeteryRoutes(fastify) {
     return { deleted: true };
   });
 }
+
+export async function cemeteryCharacterRoutes(fastify) {
+  // GET /cemetery/characters
+  fastify.get('/cemetery/characters', async (req) => {
+    const res = await query(
+      `SELECT
+         pc.*,
+         COALESCE(u.display_name, u.name) AS owner_name,
+         EXISTS(
+           SELECT 1
+           FROM player_character_tributes pct
+           WHERE pct.player_character_id = pc.id
+             AND pct.user_id = $1
+         ) AS tributed_by_me
+       FROM player_characters pc
+       LEFT JOIN users u ON u.id = pc.owner_id
+       WHERE pc.dead = TRUE OR pc.retired = TRUE
+       ORDER BY COALESCE(pc.tribute_count, 0) DESC,
+                pc.updated_at DESC`,
+      [req.user.id],
+    );
+
+    return res.rows.map(r => ({
+      id:             r.id,
+      foundryActorId: r.foundry_actor_id,
+      name:           r.name,
+      level:          r.level,
+      xp:             r.xp,
+      tokenImg:       r.token_img,
+      portraitImg:    r.portrait_img,
+      classe:         r.classe,
+      race:           r.race,
+      retired:        r.retired,
+      dead:           r.dead,
+      dead_at:        r.dead_at,
+      retiredAt:      r.retired_at,
+      retireReason:   r.retire_reason,
+      origin:         r.origin,
+      tribute_count:  r.tribute_count ?? 0,
+      ownerName:      r.owner_name,
+      owner_id:       r.owner_id,
+      tributed_by_me: r.tributed_by_me,
+    }));
+  });
+
+  // POST /cemetery/pc/:id/tribute
+  fastify.post('/cemetery/pc/:id/tribute', async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'cemetery:tribute', { limit: 60, windowMs: 60_000 })) {
+      return reply;
+    }
+
+    const { id } = req.params;
+
+    const char = await query(
+      `SELECT id
+       FROM player_characters
+       WHERE id = $1
+         AND (dead = TRUE OR retired = TRUE)`,
+      [id],
+    );
+
+    if (!char.rows.length) {
+      return reply.code(404).send({ error: 'Character not found' });
+    }
+
+    const exists = await query(
+      `SELECT 1
+       FROM player_character_tributes
+       WHERE player_character_id = $1
+         AND user_id = $2`,
+      [id, req.user.id],
+    );
+
+    if (exists.rows.length > 0) {
+      await query(
+        `DELETE FROM player_character_tributes
+         WHERE player_character_id = $1
+           AND user_id = $2`,
+        [id, req.user.id],
+      );
+
+      await query(
+        `UPDATE player_characters
+         SET tribute_count = GREATEST(COALESCE(tribute_count, 0) - 1, 0)
+         WHERE id = $1`,
+        [id],
+      );
+    } else {
+      await query(
+        `INSERT INTO player_character_tributes (
+          player_character_id,
+          user_id
+        )
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING`,
+        [id, req.user.id],
+      );
+
+      await query(
+        `UPDATE player_characters
+         SET tribute_count = COALESCE(tribute_count, 0) + 1,
+             last_tribute_at = NOW()
+         WHERE id = $1`,
+        [id],
+      );
+    }
+
+    const updated = await query(
+      'SELECT * FROM player_characters WHERE id = $1',
+      [id],
+    );
+
+    return updated.rows[0];
+  });
+}

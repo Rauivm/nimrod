@@ -14,13 +14,13 @@ import { registerClient } from './ws/broadcast.js';
 import { postRoutes } from './routes/posts.js';
 import { missionRoutes } from './routes/missions.js';
 import { pollRoutes } from './routes/polls.js';
-import { cemeteryRoutes } from './routes/cemetery.js';
+import { cemeteryRoutes, cemeteryCharacterRoutes } from './routes/cemetery.js';
 import { mapRoutes } from './routes/maps.js';
 import { userRoutes, configRoutes } from './routes/users.js';
 import { foundryRoutes } from './routes/foundry.js';
 import { profileRoutes } from './routes/profile.js';
 import { startCemeteryDecay } from './jobs/cemeteryDecay.js';
-import { startFoundrySync } from './services/foundrySync.js';
+//import { startFoundrySync } from './services/foundrySync.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
@@ -39,9 +39,25 @@ fastify.setErrorHandler((error, request, reply) => {
 });
 
 // ── Plugins ───────────────────────────────────────────────────────────────────
-await fastify.register(cors, {
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+/* await fastify.register(cors, {
+  origin: true,
   credentials: true,
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Nimrod-Key',
+  ],
+}); */
+
+await fastify.register(cors, {
+  origin: true,
+  credentials: false,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'X-Nimrod-Key',
+  ],
 });
 
 await fastify.register(websocket);
@@ -62,10 +78,7 @@ fastify.register(async function wsPlugin(app) {
     const socket = connection.socket;
     try {
       await cfAuthMiddleware(req);
-      if (!req.user) {
-        socket.close(1008, 'Unauthorized');
-        return;
-      }
+      if (!req.user) { socket.close(1008, 'Unauthorized'); return; }
       registerClient(socket, req.user.id);
       socket.send(JSON.stringify({ type: 'CONNECTED', ts: Date.now() }));
     } catch {
@@ -87,6 +100,7 @@ await fastify.register(postRoutes);
 await fastify.register(missionRoutes);
 await fastify.register(pollRoutes);
 await fastify.register(cemeteryRoutes);
+await fastify.register(cemeteryCharacterRoutes);
 await fastify.register(mapRoutes);
 await fastify.register(foundryRoutes);
 await fastify.register(profileRoutes);
@@ -95,7 +109,7 @@ await fastify.register(profileRoutes);
 try {
   await runMigrations();
   startCemeteryDecay();
-  startFoundrySync();
+  //startFoundrySync();
   await fastify.listen({ port: parseInt(process.env.PORT) || 3001, host: '0.0.0.0' });
   console.log('🎲 foundry-nimrod backend running on port', process.env.PORT || 3001);
 } catch (err) {

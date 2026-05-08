@@ -177,13 +177,17 @@ export default function ProfilePage() {
   const triggerSync = async () => {
     setSyncing(true);
     setSyncResult(null);
+
     try {
-      const res = await api.post('/foundry/actors/sync', {});
-      setSyncResult(`✓ ${res.synced} personagens sincronizados`);
       await loadProfile();
+
+      setSyncResult(
+        '✓ Perfil atualizado com dados sincronizados do Foundry',
+      );
     } catch (err) {
       setSyncResult(`✗ ${err.message}`);
     }
+
     setSyncing(false);
   };
 

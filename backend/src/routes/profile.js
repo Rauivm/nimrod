@@ -19,7 +19,7 @@ import { join, extname } from 'path';
 import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 import { query } from '../db/index.js';
-import { syncFoundryActors } from '../services/foundrySync.js';
+import { upsertFoundryActors } from '../services/foundrySync.js';
 import { broadcast } from '../ws/broadcast.js';
 
 const ALLOWED_IMG_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
@@ -232,12 +232,12 @@ export async function profileRoutes(fastify) {
 
   // ── POST /foundry/actors/sync (GM only) ───────────────────────────────────
   // Triggers an immediate re-sync from actors.db.
-  fastify.post('/foundry/actors/sync', async (req, reply) => {
+/*   fastify.post('/foundry/actors/sync', async (req, reply) => {
     if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
 
     const result = await syncFoundryActors();
     return reply.send(result);
-  });
+  }); */
 
   // ── POST /me/avatar ────────────────────────────────────────────────────────
   // Multipart upload for profile picture.
