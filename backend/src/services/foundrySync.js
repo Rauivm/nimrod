@@ -1,5 +1,6 @@
 import { query } from '../db/index.js';
 
+
 const SYSTEM =
   process.env.FOUNDRY_SYSTEM || 'dnd5e';
 
@@ -119,4 +120,37 @@ export async function upsertFoundryActors(actors = []) {
     synced,
     skipped,
   };
+}
+
+export async function pullFoundryActors() {
+  const foundryUrl =
+    process.env.FOUNDRY_URL?.replace(/\/$/, '');
+
+  const apiKey =
+    process.env.FOUNDRY_API_KEY;
+
+  if (!foundryUrl || !apiKey) {
+    throw new Error(
+      'Missing FOUNDRY_URL or FOUNDRY_API_KEY',
+    );
+  }
+
+  const response = await fetch(
+    `${foundryUrl}/api/nimrod/actors`,
+    {
+      headers: {
+        'X-Nimrod-Key': apiKey,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Foundry sync failed: ${response.status}`,
+    );
+  }
+
+  const actors = await response.json();
+
+  return upsertFoundryActors(actors);
 }

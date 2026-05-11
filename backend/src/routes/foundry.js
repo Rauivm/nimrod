@@ -1,5 +1,6 @@
 import { query } from '../db/index.js';
 import { signFoundryToken, verifyFoundryToken } from '../services/foundryAuth.js';
+import { pullFoundryActors } from '../services/foundrySync.js';
 
 /**
  * Foundry VTT integration routes.
@@ -145,7 +146,7 @@ export async function foundryRoutes(fastify) {
       return reply.code(502).send({ error: 'Could not reach Foundry' });
     }
   });
-  fastify.options('/foundry/push-actors', async (req, reply) => {
+/*   fastify.options('/foundry/push-actors', async (req, reply) => {
     reply
       .header('Access-Control-Allow-Origin', '*')
       .header('Access-Control-Allow-Headers', 'Content-Type, X-Nimrod-Key')
@@ -183,5 +184,20 @@ export async function foundryRoutes(fastify) {
       ok: true,
       ...result,
     };
+  });/* */
+  fastify.post('/foundry/sync', async (req, reply) => {
+    const apiKey =
+      req.headers['x-nimrod-key'];
+
+    if (apiKey !== process.env.FOUNDRY_API_KEY) {
+      return reply.code(401).send({
+        error: 'Unauthorized',
+      });
+    }
+
+    const result =
+      await pullFoundryActors();
+
+    return result;
   });
 }
