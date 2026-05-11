@@ -154,34 +154,37 @@ export async function foundryRoutes(fastify) {
   });
 
   fastify.post('/foundry/push-actors', async (req, reply) => {
-    reply.header('Access-Control-Allow-Origin', '*');
+    reply.header('Access-Control-Allow-Origin', '*'); // worker is server-side, but harmless
 
-    const sentKey =
-      req.headers['x-nimrod-key'];
+    const sentKey       = req.headers['x-nimrod-key'];
+    const configuredKey = process.env.FOUNDRY_API_KEY?.trim();
 
-    const configuredKey =
-      process.env.FOUNDRY_API_KEY?.trim();
-
-    if (!configuredKey || sentKey !== configuredKey) {
-      return reply.code(401).send({
-        error: 'Invalid API key',
-      });
+    if (!configuredKey) {
+      req.log.error('FOUNDRY_API_KEY is not set');
+      return reply.code(503).send({ error: 'Service not configured' });
     }
 
-    const actors =
-      Array.isArray(req.body?.actors)
-        ? req.body.actors
-        : [];
+    // Constant-time comparison to prevent timing attacks
+    const crypto = await import('node:crypto');
+    const valid  =
+      sentKey?.length === configuredKey.length &&
+      crypto.timingSafeEqual(Buffer.from(sentKey), Buffer.from(configuredKey));
 
-    const { upsertFoundryActors } =
-      await import('../services/foundrySync.js');
+    if (!valid) {
+      req.log.warn({ ip: req.ip }, 'Push-actors: invalid API key');
+      return reply.code(401).send({ error: 'Invalid API key' });
+    }
 
-    const result =
-      await upsertFoundryActors(actors);
+    const actors = Array.isArray(req.body?.actors) ? req.body.actors : [];
 
-    return {
-      ok: true,
-      ...result,
-    };
+    if (!actors.length) {
+      return reply.code(400).send({ error: 'actors array is required and must be non-empty' });
+    }
+
+    const { upsertFoundryActors } = await import('../services/foundrySync.js');
+    const result = await upsertFoundryActors(actors);
+
+    req.log.info({ ...result }, 'push-actors complete');
+    return { ok: true, ...result };
   });
 }

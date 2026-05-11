@@ -1,17 +1,9 @@
 {
   "id": "nimrod-sync",
-  "title": "Nimrod Sync — Actor API",
-  "description": "Exposes a secure read-only HTTP endpoint at /nimrod/actors so the Nimrod backend can pull live actor data without touching the Foundry database directly. Works with Foundry open and running. Requires API key configuration in module settings.",
-  "version": "2.0.0",
-  "compatibility": {
-    "minimum": "12",
-    "verified": "13"
-  },
+  "title": "Nimrod Sync — Actor Push",
+  "description": "Pushes actor changes to the local Foundry Bridge on localhost:3999.",
+  "version": "3.0.0",
+  "compatibility": { "minimum": "12", "verified": "14" },
   "esmodules": ["nimrod-sync.js"],
-  "authors": [
-    { "name": "Nimrod Team" }
-  ],
-  "url": "",
-  "manifest": "",
-  "download": ""
+  "authors": [{ "name": "Raui" }]
 }

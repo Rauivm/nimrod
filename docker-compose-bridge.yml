@@ -1,0 +1,56 @@
+# docker-compose.yml (Foundry server machine)
+
+services:
+
+  foundry-bridge:
+    build: ./foundry-bridge
+    restart: unless-stopped
+    environment:
+      REDIS_HOST:      redis
+      REDIS_PORT:      6379
+      NIMROD_URL:      https://nimrod.raui.uk/foundry/push-actors
+      FOUNDRY_API_KEY: ${FOUNDRY_API_KEY}
+    ports:
+      - "127.0.0.1:3999:3999"   # localhost only — critical
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - bridge-internal
+
+  foundry-bridge-worker:
+    build: ./foundry-bridge
+    command: node src/worker.js
+    restart: unless-stopped
+    environment:
+      REDIS_HOST:      redis
+      REDIS_PORT:      6379
+      NIMROD_URL:      https://nimrod.raui.uk/foundry/push-actors
+      FOUNDRY_API_KEY: ${FOUNDRY_API_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - bridge-internal
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test:     ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout:  3s
+      retries:  5
+    networks:
+      - bridge-internal
+
+networks:
+  bridge-internal:
+    driver: bridge
+    internal: true   # no external internet access for Redis
+
+volumes:
+  redis-data:
