@@ -8,29 +8,75 @@ export async function upsertFoundryActors(actors) {
   let skipped  = 0;
 
   for (const a of actors) {
+    // modifiedAt nunca pode ser null/undefined — o WHERE do ON CONFLICT depende disso.
+    // Se chegar sem o campo, usa o timestamp atual como fallback seguro.
+    const modifiedAt = a.modifiedAt ?? Date.now();
+
     const result = await query(
-      `UPDATE player_characters
-       SET
-         name           = $1,
-         level          = $2,
-         xp             = $3,
-         xp_next        = $4,
-         classe         = $5,
-         race           = $6,
-         biography      = $7,
-         portrait_img   = $8,
-         token_img      = $9,
-         dead           = $10,
-         retired        = $11,
-         last_synced_at = now(),
-         updated_at     = now()
-       WHERE foundry_actor_id = $12
-         AND (
-           last_synced_at IS NULL
-           OR $13 >= EXTRACT(EPOCH FROM last_synced_at) * 1000
-         )
-       RETURNING id`,
+      `
+      INSERT INTO player_characters (
+        foundry_actor_id,
+        name,
+        level,
+        xp,
+        xp_next,
+        classe,
+        race,
+        biography,
+        portrait_img,
+        token_img,
+        dead,
+        retired,
+        last_synced_at,
+        updated_at,
+        created_at,
+        origin
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8,
+        $9,
+        $10,
+        $11,
+        $12,
+        now(),
+        now(),
+        now(),
+        'foundry'
+      )
+
+      ON CONFLICT (foundry_actor_id)
+
+      DO UPDATE SET
+        name           = EXCLUDED.name,
+        level          = EXCLUDED.level,
+        xp             = EXCLUDED.xp,
+        xp_next        = EXCLUDED.xp_next,
+        classe         = EXCLUDED.classe,
+        race           = EXCLUDED.race,
+        biography      = EXCLUDED.biography,
+        portrait_img   = EXCLUDED.portrait_img,
+        token_img      = EXCLUDED.token_img,
+        dead           = EXCLUDED.dead,
+        retired        = EXCLUDED.retired,
+        last_synced_at = now(),
+        updated_at     = now()
+
+      WHERE
+        player_characters.last_synced_at IS NULL
+        OR
+        $13 >= EXTRACT(EPOCH FROM player_characters.last_synced_at) * 1000
+
+      RETURNING id
+      `,
       [
+        a.id,
         a.name,
         a.level      ?? 1,
         a.xp         ?? 0,
@@ -38,19 +84,18 @@ export async function upsertFoundryActors(actors) {
         a.classe     ?? null,
         a.race       ?? null,
         a.biography  ?? null,
-        a.img        ?? null,      // portrait_img
-        a.tokenImg   ?? null,      // token_img
-        a.isDead     ?? false,     // dead
-        a.isRetired  ?? false,     // retired
-        a.id,                      // foundry_actor_id
-        a.modifiedAt,              // last-write-wins guard
+        a.img        ?? null,
+        a.tokenImg   ?? null,
+        a.isDead     ?? false,
+        a.isRetired  ?? false,
+        modifiedAt,             // $13 — sempre um número válido
       ]
     );
 
     if (result.rowCount > 0) {
       upserted++;
     } else {
-      skipped++;  // não encontrou foundry_actor_id ou era dado mais antigo
+      skipped++;  // dado mais antigo que o que está no banco — ignorado intencionalmente
     }
   }
 

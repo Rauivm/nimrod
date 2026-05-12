@@ -2,8 +2,22 @@
   "id": "nimrod-sync",
   "title": "Nimrod Sync — Actor Push",
   "description": "Pushes actor changes to the local Foundry Bridge on localhost:3999.",
-  "version": "3.0.0",
-  "compatibility": { "minimum": "12", "verified": "14" },
+  "version": "4.0.0",
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14"
+  },
   "esmodules": ["nimrod-sync.js"],
+  "relationships": {
+    "systems": [
+      {
+        "id": "dnd5e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "3.0.0"
+        }
+      }
+    ]
+  },
   "authors": [{ "name": "Raui" }]
 }

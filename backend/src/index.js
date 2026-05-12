@@ -20,7 +20,7 @@ import { userRoutes, configRoutes } from './routes/users.js';
 import { foundryRoutes } from './routes/foundry.js';
 import { profileRoutes } from './routes/profile.js';
 import { startCemeteryDecay } from './jobs/cemeteryDecay.js';
-import { pullFoundryActors } from './services/foundrySync.js';
+//import { pullFoundryActors } from './services/foundrySync.js';
 //import { startFoundrySync } from './services/foundrySync.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -106,7 +106,7 @@ try {
   await runMigrations();
   startCemeteryDecay();
   //startFoundrySync();
-  await pullFoundryActors();
+  //await pullFoundryActors();
   await fastify.listen({ port: parseInt(process.env.PORT) || 3001, host: '0.0.0.0' });
   console.log('🎲 foundry-nimrod backend running on port', process.env.PORT || 3001);
 } catch (err) {

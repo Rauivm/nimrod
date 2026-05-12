@@ -1,6 +1,6 @@
 import { query } from '../db/index.js';
 import { signFoundryToken, verifyFoundryToken } from '../services/foundryAuth.js';
-import { pullFoundryActors } from '../services/foundrySync.js';
+//import { pullFoundryActors } from '../services/foundrySync.js';
 
 /**
  * Foundry VTT integration routes.
