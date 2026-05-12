@@ -41,13 +41,10 @@ fastify.setErrorHandler((error, request, reply) => {
 
 // ── Plugins ───────────────────────────────────────────────────────────────────
 await fastify.register(cors, {
-  origin: true,
-  credentials: false,
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type',
-    'X-Nimrod-Key',
-  ],
+  origin:         true,
+  credentials:    false,
+  methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // ← adicionado
+  allowedHeaders: ['Content-Type', 'X-Nimrod-Key', 'Authorization'],
 });
 
 await fastify.register(websocket);
@@ -81,7 +78,15 @@ fastify.register(async function wsPlugin(app) {
 // ── Global auth hook ──────────────────────────────────────────────────────────
 fastify.addHook('onRequest', async (req, reply) => {
   const path = req.url.split('?')[0];
-  if (path === '/health' || path === '/config' || path === '/ws') return;
+
+  // Rotas públicas — sem auth
+  if (
+    path === '/health'              ||
+    path === '/config'              ||
+    path === '/ws'                  ||
+    path === '/foundry/push-actors' // ← worker usa X-Nimrod-Key, não CF token
+  ) return;
+
   await cfAuthMiddleware(req, reply);
 });
 
