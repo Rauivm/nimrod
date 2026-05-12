@@ -1,5 +1,6 @@
 import { query } from '../db/index.js';
 import { signFoundryToken, verifyFoundryToken } from '../services/foundryAuth.js';
+import { pullFoundryActors } from '../services/foundrySync.js';
 
 /**
  * Foundry VTT integration routes.
@@ -145,7 +146,7 @@ export async function foundryRoutes(fastify) {
       return reply.code(502).send({ error: 'Could not reach Foundry' });
     }
   });
-  fastify.options('/foundry/push-actors', async (req, reply) => {
+/*   fastify.options('/foundry/push-actors', async (req, reply) => {
     reply
       .header('Access-Control-Allow-Origin', '*')
       .header('Access-Control-Allow-Headers', 'Content-Type, X-Nimrod-Key')
@@ -177,6 +178,7 @@ export async function foundryRoutes(fastify) {
 
     const actors = Array.isArray(req.body?.actors) ? req.body.actors : [];
 
+<<<<<<< HEAD
     if (!actors.length) {
       return reply.code(400).send({ error: 'actors array is required and must be non-empty' });
     }
@@ -186,5 +188,26 @@ export async function foundryRoutes(fastify) {
 
     req.log.info({ ...result }, 'push-actors complete');
     return { ok: true, ...result };
+=======
+    return {
+      ok: true,
+      ...result,
+    };
+  });/* */
+  fastify.post('/foundry/sync', async (req, reply) => {
+    const apiKey =
+      req.headers['x-nimrod-key'];
+
+    if (apiKey !== process.env.FOUNDRY_API_KEY) {
+      return reply.code(401).send({
+        error: 'Unauthorized',
+      });
+    }
+
+    const result =
+      await pullFoundryActors();
+
+    return result;
+>>>>>>> 1d5e26db5e82c5cb192b2fb034deb983f5cdea22
   });
 }
