@@ -1,111 +1,221 @@
 /**
  * app.js — Fastify application factory.
- *
- * Separates server construction from server startup so that tests can call
- * build({ mockUser, mockDb }) without binding a port or touching the database.
- *
- * Production entry point (src/index.js) calls build() then app.listen().
  */
 
 import Fastify from 'fastify';
+import jwt from 'jsonwebtoken';
+
 import { signFoundryToken, verifyFoundryToken } from './services/foundryAuth.js';
 import { resolveFoundryMapping } from './services/foundryMap.js';
 
+const {
+  NODE_ENV = 'development',
+  DEV_USER_EMAIL,
+  DEV_USER_ROLE = 'PLAYER',
+  DEV_USER_NAME = 'Dev',
+  FOUNDRY_URL,
+  FOUNDRY_JWT_SECRET,
+  CLOUDFLARE_ACCESS_JWT_SECRET,
+} = process.env;
+
+const IS_PROD = NODE_ENV === 'production';
+
+if (!FOUNDRY_JWT_SECRET) {
+  throw new Error('FOUNDRY_JWT_SECRET is required');
+}
+
+if (IS_PROD && !CLOUDFLARE_ACCESS_JWT_SECRET) {
+  throw new Error('CLOUDFLARE_ACCESS_JWT_SECRET is required in production');
+}
+
+function extractCloudflareIdentity(req) {
+  const cfJwt = req.headers['cf-access-jwt-assertion'];
+
+  if (!cfJwt) {
+    return null;
+  }
+
+  try {
+    const payload = jwt.verify(cfJwt, CLOUDFLARE_ACCESS_JWT_SECRET);
+
+    return {
+      email:
+        payload.email ||
+        payload.sub ||
+        payload['cf-access-authenticated-user-email'],
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * @param {object} opts
- * @param {object} [opts.mockUser]   – If set, every request gets this user injected
- *                                     (bypasses cfAuthMiddleware). Used in tests.
- * @param {object} [opts.mockDb]     – Pool-compatible mock: { query, connect? }.
- *                                     connect() must return a client stub for
- *                                     transaction-path tests.
- * @param {boolean} [opts.logger]    – Fastify logger flag (default false in tests)
+ * @param {object} [opts.mockUser]
+ * @param {object} [opts.mockDb]
+ * @param {boolean} [opts.logger]
  */
-export async function build({ mockUser = null, mockDb = null, logger = false } = {}) {
-  const fastify = Fastify({ logger });
-
-  // ── Error handler ─────────────────────────────────────────────────────────
-  fastify.setErrorHandler((error, request, reply) => {
-    const status = error.statusCode || 500;
-    reply.code(status).send({ error: error.message || 'Internal Server Error' });
+export async function build({
+  mockUser = null,
+  mockDb = null,
+  logger = false,
+} = {}) {
+  const fastify = Fastify({
+    logger,
   });
 
-  // ── Auth decoration ───────────────────────────────────────────────────────
-/*   fastify.addHook('preHandler', async (req) => {
+  // ───────────────────────────────────────────────────────────────────────────
+  // Error handler
+  // ───────────────────────────────────────────────────────────────────────────
+
+  fastify.setErrorHandler((error, request, reply) => {
+    const status = error.statusCode || 500;
+
+    if (logger) {
+      request.log.error(error);
+    }
+
+    return reply.code(status).send({
+      error: error.message || 'Internal Server Error',
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Authentication
+  // ───────────────────────────────────────────────────────────────────────────
+
+  fastify.addHook('preHandler', async (req) => {
+    // Test injection
     if (mockUser) {
       req.user = mockUser;
       return;
     }
 
-    const devEmail = process.env.DEV_USER_EMAIL;
-
-    if (devEmail) {
+    // Local development bypass
+    if (!IS_PROD && DEV_USER_EMAIL) {
       req.user = {
-        email: devEmail,
-        role: process.env.DEV_USER_ROLE || 'PLAYER',
-        name: process.env.DEV_USER_NAME || 'Dev'
+        email: DEV_USER_EMAIL,
+        role: DEV_USER_ROLE,
+        name: DEV_USER_NAME,
       };
+
       return;
     }
 
-    const email = req.headers['cf-access-authenticated-user-email'];
+    // Production Cloudflare validation
+    const identity = extractCloudflareIdentity(req);
 
-    if (!email) {
-      throw fastify.httpErrors.unauthorized();
+    if (!identity?.email) {
+      throw fastify.httpErrors.unauthorized('Unauthorized');
     }
 
-    req.user = { email };
+    req.user = {
+      email: identity.email,
+    };
   });
- */
-  // ── DB + service wiring ───────────────────────────────────────────────────
-  // mockDb must be pool-shaped: { query, connect? }.
-  // resolveFoundryMapping receives the pool directly so tests can inject it.
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // DB wiring
+  // ───────────────────────────────────────────────────────────────────────────
+
   const dbPool = mockDb ?? (await import('./db/index.js')).pool;
 
-  const secret = process.env.FOUNDRY_JWT_SECRET || 'test_secret';
+  // ───────────────────────────────────────────────────────────────────────────
+  // Routes
+  // ───────────────────────────────────────────────────────────────────────────
 
-  // ── GET /foundry/launch ───────────────────────────────────────────────────
-  // Auto-provisions a Foundry mapping for first-time users.
-  // First user in an empty table → GM. All subsequent → PLAYER.
-  // Existing users are never modified.
-  fastify.get('/foundry/launch', async (req, reply) => {
-    if (!req.user) return reply.code(401).send({ error: 'Unauthorized' });
-
-    const foundryBaseUrl = (process.env.FOUNDRY_URL || 'https://foundry.example.com').replace(/\/$/, '');
-    const { email } = req.user;
-
-    const mapping = await resolveFoundryMapping(dbPool, email);
-    const { role, world, actor_name } = mapping;
-
-    const payload = {
-      e:   email,
-      r:   role,
-      w:   world,
-      a:   actor_name || null,
-      exp: Math.floor(Date.now() / 1000) + 60,
+  fastify.get('/api/me', async (req) => {
+    return {
+      authenticated: true,
+      user: {
+        email: req.user.email,
+      },
     };
-
-    const token = signFoundryToken(payload, secret);
-    return reply.send({ url: `${foundryBaseUrl}?t=${token}` });
   });
 
-  // ── POST /nimrod/verify ───────────────────────────────────────────────────
+  // ───────────────────────────────────────────────────────────────────────────
+  // GET /foundry/launch
+  // ───────────────────────────────────────────────────────────────────────────
+
+  fastify.get('/foundry/launch', async (req, reply) => {
+    if (!req.user?.email) {
+      return reply.code(401).send({
+        error: 'Unauthorized',
+      });
+    }
+
+    const foundryBaseUrl = (
+      FOUNDRY_URL || 'https://foundry.example.com'
+    ).replace(/\/$/, '');
+
+    const mapping = await resolveFoundryMapping(
+      dbPool,
+      req.user.email,
+    );
+
+    const {
+      role,
+      world,
+      actor_name,
+    } = mapping;
+
+    const payload = {
+      e: req.user.email,
+      r: role,
+      w: world,
+      a: actor_name || null,
+
+      // 5 minutes
+      exp: Math.floor(Date.now() / 1000) + 300,
+    };
+
+    const token = signFoundryToken(
+      payload,
+      FOUNDRY_JWT_SECRET,
+    );
+
+    const url = new URL(foundryBaseUrl);
+
+    url.searchParams.set('t', token);
+
+    return reply.send({
+      url: url.toString(),
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // POST /nimrod/verify
+  // ───────────────────────────────────────────────────────────────────────────
+
   fastify.post('/nimrod/verify', async (req, reply) => {
     const { token } = req.body ?? {};
-    if (!token) return reply.code(400).send({ error: 'token is required' });
+
+    if (!token) {
+      return reply.code(400).send({
+        error: 'token is required',
+      });
+    }
 
     try {
-      const payload = verifyFoundryToken(token, secret);
+      const payload = verifyFoundryToken(
+        token,
+        FOUNDRY_JWT_SECRET,
+      );
+
       return reply.send({
         email: payload.e,
-        role:  payload.r,
+        role: payload.r,
         world: payload.w,
         actor: payload.a ?? null,
       });
     } catch {
-      return reply.code(401).send({ error: 'Invalid token' });
+      return reply.code(401).send({
+        error: 'Invalid token',
+      });
     }
   });
 
   await fastify.ready();
+
   return fastify;
 }
