@@ -126,7 +126,7 @@ app.get('/health', async () => ({ ok: true, ts: Date.now() }));
 // ── Start ─────────────────────────────────────────────────────────────────────
 // Bind em 127.0.0.1 — NUNCA em 0.0.0.0 (porta não deve ser acessível externamente)
 // Before (broken in Docker):
-//await app.listen({ host: '127.0.0.1', port: 3999 });
+await app.listen({ host: '127.0.0.1', port: 3999 });
 
 // After:
-await app.listen({ host: '0.0.0.0', port: 3999 });
+//await app.listen({ host: '0.0.0.0', port: 3999 });
