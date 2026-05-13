@@ -84,34 +84,32 @@ export async function build({
   // Authentication
   // ───────────────────────────────────────────────────────────────────────────
 
-  fastify.addHook('preHandler', async (req) => {
-    // Test injection
-    if (mockUser) {
-      req.user = mockUser;
+  fastify.addHook('onRequest', async (req, reply) => {
+    const path = req.url.split('?')[0];
+
+    // 1. Bypass para rotas públicas e internas
+    if (
+      path === '/health' ||
+      path === '/config' ||
+      path === '/foundry/push-actors' ||
+      path.startsWith('/api/') // Permite que as rotas tratem a própria auth ou sejam públicas
+    ) {
       return;
     }
 
-    // Local development bypass
+    // 2. Bypass para desenvolvimento local
     if (!IS_PROD && DEV_USER_EMAIL) {
-      req.user = {
-        email: DEV_USER_EMAIL,
-        role: DEV_USER_ROLE,
-        name: DEV_USER_NAME,
-      };
-
+      req.user = { email: DEV_USER_EMAIL, role: DEV_USER_ROLE, name: DEV_USER_NAME };
       return;
     }
 
-    // Production Cloudflare validation
-    const identity = extractCloudflareIdentity(req);
-
-    if (!identity?.email) {
-      throw fastify.httpErrors.unauthorized('Unauthorized');
+    // 3. Validação Cloudflare em Produção
+    const email = req.headers['cf-access-authenticated-user-email'];
+    if (IS_PROD && !email) {
+      return reply.code(401).send({ error: 'Unauthorized' });
     }
 
-    req.user = {
-      email: identity.email,
-    };
+    req.user = { email };
   });
 
   // ───────────────────────────────────────────────────────────────────────────
