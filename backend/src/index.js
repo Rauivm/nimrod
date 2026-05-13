@@ -93,16 +93,15 @@ fastify.addHook('onRequest', async (req, reply) => {
 });
 
 // ── Authenticated routes ──────────────────────────────────────────────────────
-await fastify.register(userRoutes);
-await fastify.register(postRoutes);
-await fastify.register(missionRoutes);
-await fastify.register(pollRoutes);
-await fastify.register(cemeteryRoutes);
-await fastify.register(cemeteryCharacterRoutes);
-await fastify.register(mapRoutes);
-await fastify.register(foundryRoutes);
-await fastify.register(profileRoutes);
-
+await fastify.register(userRoutes, { prefix: '/api' });
+await fastify.register(postRoutes, { prefix: '/api' });
+await fastify.register(missionRoutes, { prefix: '/api' });
+await fastify.register(pollRoutes, { prefix: '/api' });
+await fastify.register(cemeteryRoutes, { prefix: '/api' });
+await fastify.register(cemeteryCharacterRoutes, { prefix: '/api' });
+await fastify.register(mapRoutes, { prefix: '/api' });
+await fastify.register(foundryRoutes, { prefix: '/api' });
+await fastify.register(profileRoutes, { prefix: '/api' });
 // ── Start ─────────────────────────────────────────────────────────────────────
 try {
   await runMigrations();
