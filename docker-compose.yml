@@ -2,7 +2,6 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
-
     env_file:
       - .env
     environment:
@@ -28,24 +27,28 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       PORT: 3001
-      FRONTEND_URL: http://frontend
       NODE_ENV: production
       UPLOADS_DIR: /app/uploads
+      # DEV_USER_EMAIL: test@local.dev   # descomente só quando precisar testar localmente
     volumes:
       - "/c/Users/rauiv/AppData/Local/FoundryVTT/Data:/foundrydata/Data"
       - uploads:/app/uploads
+      - ./backend/src:/app/src          # ← Hot reload (muito útil no seu notebook)
     ports:
       - "3001:3001"
 
   frontend:
-    build: ./frontend
+    build: 
+      context: ./frontend
+      args:
+        - VITE_API_BASE=http://backend:3001   # Passa na hora do build
     restart: unless-stopped
     depends_on:
       - backend
     ports:
-      - "80:80"
+      - "8088:80"                          # Boa escolha (evita conflito com porta 80)
     environment:
-      - VITE_API_BASE=http://backend:3001   # ← Crucial para o build
+      - VITE_API_BASE=http://backend:3001   # Backup (caso precise)
 
 volumes:
   pgdata:
