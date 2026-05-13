@@ -59,6 +59,14 @@ await fastify.register(staticFiles, {
 // ── Public routes (no auth) ───────────────────────────────────────────────────
 await fastify.register(configRoutes);
 fastify.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
+fastify.get('/debug-headers', async (req) => {
+  return {
+    cfAccessEmail: req.headers['cf-access-authenticated-user-email'],
+    cfAccessUserName: req.headers['cf-access-user-name'],
+    cfRay: req.headers['cf-ray'],
+    allCfHeaders: Object.keys(req.headers).filter(h => h.startsWith('cf-'))
+  };
+});
 
 // ====================== AUTHENTICATION ======================
 //import { cfAuthMiddleware } from './middleware/auth.js'; // já existe
