@@ -13,7 +13,25 @@ export async function cfAuthMiddleware(request, reply) {
     return;
   }
 
-  const emailHeader = process.env.CLOUDFLARE_HEADER_EMAIL || 'cf-access-authenticated-user-email';
+  // Production - Cloudflare
+  const email = request.headers['cf-access-authenticated-user-email'];
+  if (!email) {
+    if (reply) return reply.code(401).send({ error: 'Unauthorized - Cloudflare Access required' });
+    throw new Error('Unauthorized');
+  }
+
+  // Proteção anti-bypass
+  if (!request.headers['cf-ray']) {
+    if (reply) return reply.code(403).send({ error: 'Direct access forbidden' });
+    throw new Error('Direct access forbidden');
+  }
+
+  const cfName = request.headers['cf-access-user-name'];
+  const name = cfName?.trim() || email.split('@')[0];
+
+  request.user = await upsertUser(email, name, 'PLAYER', false);
+
+/*   const emailHeader = process.env.CLOUDFLARE_HEADER_EMAIL || 'cf-access-authenticated-user-email';
   const nameHeader  = process.env.CLOUDFLARE_HEADER_NAME  || 'cf-access-user-name';
 
   const email  = request.headers[emailHeader];
@@ -22,7 +40,7 @@ export async function cfAuthMiddleware(request, reply) {
   if (!email) return reply.code(401).send({ error: 'Unauthorized' });
 
   const name = cfName || email.split('@')[0];
-  request.user = await upsertUser(email, name, 'PLAYER', false);
+  request.user = await upsertUser(email, name, 'PLAYER', false); */
 }
 
 /**

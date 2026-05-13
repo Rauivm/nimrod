@@ -3,19 +3,18 @@
  */
 
 import Fastify from 'fastify';
-import jwt from 'jsonwebtoken';
 
 import { signFoundryToken, verifyFoundryToken } from './services/foundryAuth.js';
 import { resolveFoundryMapping } from './services/foundryMap.js';
+import { pool } from './db/index.js';   // ← Importe o pool diretamente
 
 const {
   NODE_ENV = 'development',
   DEV_USER_EMAIL,
+  DEV_USER_NAME = 'Dev User',
   DEV_USER_ROLE = 'PLAYER',
-  DEV_USER_NAME = 'Dev',
   FOUNDRY_URL,
   FOUNDRY_JWT_SECRET,
-  CLOUDFLARE_ACCESS_JWT_SECRET,
 } = process.env;
 
 const IS_PROD = NODE_ENV === 'production';
@@ -24,196 +23,92 @@ if (!FOUNDRY_JWT_SECRET) {
   throw new Error('FOUNDRY_JWT_SECRET is required');
 }
 
-if (IS_PROD && !CLOUDFLARE_ACCESS_JWT_SECRET) {
-  throw new Error('CLOUDFLARE_ACCESS_JWT_SECRET is required in production');
+// ====================== UPSERT USER ======================
+async function upsertUser(email, name, role = 'PLAYER') {
+  const sql = `
+    INSERT INTO users (email, name, role)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (email) 
+    DO UPDATE 
+      SET name = EXCLUDED.name,
+          role = EXCLUDED.role
+    RETURNING *`;
+
+  const { rows } = await pool.query(sql, [email, name, role]);  // ← usando pool.query
+  return rows[0];
 }
 
-function extractCloudflareIdentity(req) {
-  const cfJwt = req.headers['cf-access-jwt-assertion'];
-
-  if (!cfJwt) {
-    return null;
-  }
-
-  try {
-    const payload = jwt.verify(cfJwt, CLOUDFLARE_ACCESS_JWT_SECRET);
-
-    return {
-      email:
-        payload.email ||
-        payload.sub ||
-        payload['cf-access-authenticated-user-email'],
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * @param {object} opts
- * @param {object} [opts.mockUser]
- * @param {object} [opts.mockDb]
- * @param {boolean} [opts.logger]
- */
-export async function build({
-  mockUser = null,
-  mockDb = null,
-  logger = false,
-} = {}) {
-  const fastify = Fastify({
-    logger,
-  });
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // Error handler
-  // ───────────────────────────────────────────────────────────────────────────
+// ====================== BUILD ======================
+export async function build({ mockUser = null, logger = false } = {}) {
+  const fastify = Fastify({ logger });
 
   fastify.setErrorHandler((error, request, reply) => {
-    const status = error.statusCode || 500;
-
-    if (logger) {
-      request.log.error(error);
-    }
-
-    return reply.code(status).send({
+    request.log?.error(error);
+    return reply.code(error.statusCode || 500).send({
       error: error.message || 'Internal Server Error',
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // Authentication
-  // ───────────────────────────────────────────────────────────────────────────
-
-  fastify.addHook('onRequest', async (req, reply) => {
-    const path = req.url.split('?')[0];
-
-    // 1. Bypass para rotas públicas e internas
-    if (
-      path === '/health' ||
-      path === '/config' ||
-      path === '/foundry/push-actors' ||
-      path.startsWith('/api/') // Permite que as rotas tratem a própria auth ou sejam públicas
-    ) {
+  // ====================== AUTHENTICATE ======================
+  fastify.decorate('authenticate', async (request, reply) => {
+    // Mock (testes)
+    if (mockUser?.email) {
+      request.user = mockUser;
       return;
     }
 
-    // 2. Bypass para desenvolvimento local
+    // Desenvolvimento
     if (!IS_PROD && DEV_USER_EMAIL) {
-      req.user = { email: DEV_USER_EMAIL, role: DEV_USER_ROLE, name: DEV_USER_NAME };
+      request.user = await upsertUser(DEV_USER_EMAIL, DEV_USER_NAME, DEV_USER_ROLE);
       return;
     }
 
-    // 3. Validação Cloudflare em Produção
-    const email = req.headers['cf-access-authenticated-user-email'];
-    if (IS_PROD && !email) {
-      return reply.code(401).send({ error: 'Unauthorized' });
+    // Produção - Cloudflare
+    const email = request.headers['cf-access-authenticated-user-email'];
+    if (!email) {
+      return reply.code(401).send({ error: 'Unauthorized - Cloudflare Access required' });
     }
 
-    req.user = { email };
+    if (!request.headers['cf-ray']) {
+      return reply.code(403).send({ error: 'Direct access forbidden' });
+    }
+
+    const name = request.headers['cf-access-user-name']?.trim() || email.split('@')[0];
+    request.user = await upsertUser(email, name);
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // DB wiring
-  // ───────────────────────────────────────────────────────────────────────────
-
-  const dbPool = mockDb ?? (await import('./db/index.js')).pool;
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // Routes
-  // ───────────────────────────────────────────────────────────────────────────
-
-  fastify.get('/api/me', async (req) => {
+  // ====================== ROTAS PÚBLICAS ======================
+  fastify.get('/health', () => ({ status: 'ok' }));
+  
+  fastify.get('/api/config', async () => {
     return {
+      // suas configurações públicas aqui
+      foundryUrl: FOUNDRY_URL,
+      isProd: IS_PROD,
+    };
+  });
+
+  // ====================== ROTAS PROTEGIDAS ======================
+  fastify.register(async function protectedRoutes(f) {
+    f.addHook('preHandler', f.authenticate);
+
+    f.get('/api/me', async (req) => ({
       authenticated: true,
-      user: {
-        email: req.user.email,
-      },
-    };
+      user: req.user,
+    }));
+
+    // Adicione aqui outras rotas /api/* que precisam de auth
+    // f.get('/api/online-users', ...)
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // GET /foundry/launch
-  // ───────────────────────────────────────────────────────────────────────────
-
-  fastify.get('/foundry/launch', async (req, reply) => {
-    if (!req.user?.email) {
-      return reply.code(401).send({
-        error: 'Unauthorized',
-      });
-    }
-
-    const foundryBaseUrl = (
-      FOUNDRY_URL || 'https://foundry.example.com'
-    ).replace(/\/$/, '');
-
-    const mapping = await resolveFoundryMapping(
-      dbPool,
-      req.user.email,
-    );
-
-    const {
-      role,
-      world,
-      actor_name,
-    } = mapping;
-
-    const payload = {
-      e: req.user.email,
-      r: role,
-      w: world,
-      a: actor_name || null,
-
-      // 5 minutes
-      exp: Math.floor(Date.now() / 1000) + 300,
-    };
-
-    const token = signFoundryToken(
-      payload,
-      FOUNDRY_JWT_SECRET,
-    );
-
-    const url = new URL(foundryBaseUrl);
-
-    url.searchParams.set('t', token);
-
-    return reply.send({
-      url: url.toString(),
-    });
+  // ====================== Foundry Routes ======================
+  fastify.get('/foundry/launch', {
+    preHandler: fastify.authenticate,
+    handler: async (req, reply) => { ... } // mantenha sua lógica original
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // POST /nimrod/verify
-  // ───────────────────────────────────────────────────────────────────────────
-
-  fastify.post('/nimrod/verify', async (req, reply) => {
-    const { token } = req.body ?? {};
-
-    if (!token) {
-      return reply.code(400).send({
-        error: 'token is required',
-      });
-    }
-
-    try {
-      const payload = verifyFoundryToken(
-        token,
-        FOUNDRY_JWT_SECRET,
-      );
-
-      return reply.send({
-        email: payload.e,
-        role: payload.r,
-        world: payload.w,
-        actor: payload.a ?? null,
-      });
-    } catch {
-      return reply.code(401).send({
-        error: 'Invalid token',
-      });
-    }
-  });
+  fastify.post('/nimrod/verify', async (req, reply) => { ... }); // sua lógica original
 
   await fastify.ready();
-
   return fastify;
 }

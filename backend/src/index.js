@@ -20,6 +20,8 @@ import { userRoutes, configRoutes } from './routes/users.js';
 import { foundryRoutes } from './routes/foundry.js';
 import { profileRoutes } from './routes/profile.js';
 import { startCemeteryDecay } from './jobs/cemeteryDecay.js';
+//import { pullFoundryActors } from './services/foundrySync.js';
+//import { startFoundrySync } from './services/foundrySync.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
@@ -39,9 +41,9 @@ fastify.setErrorHandler((error, request, reply) => {
 
 // ── Plugins ───────────────────────────────────────────────────────────────────
 await fastify.register(cors, {
-  origin: true,
-  credentials: true, // ← CORREÇÃO: Precisa ser true para enviar cookies de auth (Cloudflare)
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  origin:         true,
+  credentials:    false,
+  methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // ← adicionado
   allowedHeaders: ['Content-Type', 'X-Nimrod-Key', 'Authorization'],
 });
 
@@ -53,21 +55,40 @@ await fastify.register(staticFiles, {
   prefix: '/uploads/',
 });
 
+
 // ── Public routes (no auth) ───────────────────────────────────────────────────
 await fastify.register(configRoutes);
 fastify.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
+
+// ====================== AUTHENTICATION ======================
+//import { cfAuthMiddleware } from './middleware/auth.js'; // já existe
+
+// Melhoria: transformar em decorator reutilizável
+fastify.decorate('authenticate', async (request, reply) => {
+  try {
+    await cfAuthMiddleware(request, reply);
+    if (!request.user) {
+      return reply.code(401).send({ error: 'Unauthorized' });
+    }
+  } catch (err) {
+    fastify.log.error(err);
+    return reply.code(401).send({ error: 'Unauthorized' });
+  }
+});
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 fastify.register(async function wsPlugin(app) {
   app.get('/ws', { websocket: true }, async (connection, req) => {
     const socket = connection.socket;
     try {
-      // O middleware de auth do WS geralmente precisa de bypass ou tratamento manual
-      await cfAuthMiddleware(req);
-      if (!req.user) { socket.close(1008, 'Unauthorized'); return; }
+      await cfAuthMiddleware(req);           // mantemos por enquanto
+      if (!req.user) {
+        socket.close(1008, 'Unauthorized');
+        return;
+      }
       registerClient(socket, req.user.id);
       socket.send(JSON.stringify({ type: 'CONNECTED', ts: Date.now() }));
-    } catch {
+    } catch (err) {
       socket.close(1008, 'Unauthorized');
     }
   });
@@ -77,35 +98,36 @@ fastify.register(async function wsPlugin(app) {
 fastify.addHook('onRequest', async (req, reply) => {
   const path = req.url.split('?')[0];
 
-  // CORREÇÃO: Adicionado o prefixo /api/ nas exceções para não travar o frontend
   if (
-    path === '/health'              ||
-    path === '/config'              ||
-    path === '/ws'                  ||
-    path === '/foundry/push-actors' ||
-    path.startsWith('/api/')        // ← Se suas rotas de missões/posts começam com /api, libere aqui
-  ) return;
+    path === '/health' ||
+    path === '/config' ||
+    path.startsWith('/uploads/') ||
+    path === '/foundry/push-actors'
+  ) {
+    return;
+  }
 
-  // Se o seu frontend chama as rotas diretamente (ex: /me em vez de /api/me), 
-  // você deve adicionar essas rotas específicas na lista acima.
-  
+  // Para todas as outras rotas (incluindo /api/* e /ws já tratado acima)
   await cfAuthMiddleware(req, reply);
 });
 
 // ── Authenticated routes ──────────────────────────────────────────────────────
-await fastify.register(userRoutes, { prefix: '/api' });
-await fastify.register(postRoutes, { prefix: '/api' });
-await fastify.register(missionRoutes, { prefix: '/api' });
-await fastify.register(pollRoutes, { prefix: '/api' });
-await fastify.register(cemeteryRoutes, { prefix: '/api' });
-await fastify.register(cemeteryCharacterRoutes, { prefix: '/api' });
-await fastify.register(mapRoutes, { prefix: '/api' });
-await fastify.register(foundryRoutes, { prefix: '/api' });
-await fastify.register(profileRoutes, { prefix: '/api' });
+await fastify.register(userRoutes);
+await fastify.register(postRoutes);
+await fastify.register(missionRoutes);
+await fastify.register(pollRoutes);
+await fastify.register(cemeteryRoutes);
+await fastify.register(cemeteryCharacterRoutes);
+await fastify.register(mapRoutes);
+await fastify.register(foundryRoutes);
+await fastify.register(profileRoutes);
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 try {
   await runMigrations();
   startCemeteryDecay();
+  //startFoundrySync();
+  //await pullFoundryActors();
   await fastify.listen({ port: parseInt(process.env.PORT) || 3001, host: '0.0.0.0' });
   console.log('🎲 foundry-nimrod backend running on port', process.env.PORT || 3001);
 } catch (err) {
