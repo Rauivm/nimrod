@@ -1,3 +1,15 @@
+/**
+ * src/index.js — entry point do servidor Nimrod.
+ *
+ * Arquitetura de autenticação:
+ *
+ *   Internet → Cloudflare Access → Cloudflare Tunnel → Fastify (localhost)
+ *
+ * O Fastify NÃO deve ser acessível diretamente da internet.
+ * A porta 3001 não deve ser exposta no docker-compose em produção.
+ * Toda a segurança de autenticação é garantida pelo Cloudflare Tunnel.
+ */
+
 import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
@@ -20,8 +32,6 @@ import { userRoutes, configRoutes } from './routes/users.js';
 import { foundryRoutes } from './routes/foundry.js';
 import { profileRoutes } from './routes/profile.js';
 import { startCemeteryDecay } from './jobs/cemeteryDecay.js';
-//import { pullFoundryActors } from './services/foundrySync.js';
-//import { startFoundrySync } from './services/foundrySync.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
@@ -35,15 +45,16 @@ fastify.setErrorHandler((error, request, reply) => {
     { err: error, url: request.url, method: request.method },
     'Request error',
   );
-  const status = error.statusCode || 500;
-  reply.code(status).send({ error: error.message || 'Internal Server Error' });
+  reply.code(error.statusCode || 500).send({
+    error: error.message || 'Internal Server Error',
+  });
 });
 
 // ── Plugins ───────────────────────────────────────────────────────────────────
 await fastify.register(cors, {
   origin:         true,
   credentials:    false,
-  methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // ← adicionado
+  methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'X-Nimrod-Key', 'Authorization'],
 });
 
@@ -51,75 +62,53 @@ await fastify.register(websocket);
 await fastify.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
 
 await fastify.register(staticFiles, {
-  root: UPLOADS_DIR,
+  root:   UPLOADS_DIR,
   prefix: '/uploads/',
 });
 
-
-// ── Public routes (no auth) ───────────────────────────────────────────────────
+// ── Rotas públicas (sem auth) ─────────────────────────────────────────────────
 await fastify.register(configRoutes);
+
 fastify.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
-fastify.get('/debug-headers', async (req) => {
-  return {
-    cfAccessEmail: req.headers['cf-access-authenticated-user-email'],
-    cfAccessUserName: req.headers['cf-access-user-name'],
-    cfRay: req.headers['cf-ray'],
-    allCfHeaders: Object.keys(req.headers).filter(h => h.startsWith('cf-'))
-  };
-});
-
-// ====================== AUTHENTICATION ======================
-//import { cfAuthMiddleware } from './middleware/auth.js'; // já existe
-
-// Melhoria: transformar em decorator reutilizável
-fastify.decorate('authenticate', async (request, reply) => {
-  try {
-    await cfAuthMiddleware(request, reply);
-    if (!request.user) {
-      return reply.code(401).send({ error: 'Unauthorized' });
-    }
-  } catch (err) {
-    fastify.log.error(err);
-    return reply.code(401).send({ error: 'Unauthorized' });
-  }
-});
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 fastify.register(async function wsPlugin(app) {
   app.get('/ws', { websocket: true }, async (connection, req) => {
-    const socket = connection.socket;
+    // @fastify/websocket ≥8: connection é o socket diretamente
+    const socket = connection.socket ?? connection;
     try {
-      await cfAuthMiddleware(req);           // mantemos por enquanto
+      // Cria um reply mínimo para que cfAuthMiddleware possa responder se necessário
+      const fakeReply = { code: () => ({ send: () => {} }) };
+      await cfAuthMiddleware(req, fakeReply);
       if (!req.user) {
         socket.close(1008, 'Unauthorized');
         return;
       }
       registerClient(socket, req.user.id);
       socket.send(JSON.stringify({ type: 'CONNECTED', ts: Date.now() }));
-    } catch (err) {
+    } catch {
       socket.close(1008, 'Unauthorized');
     }
   });
 });
 
-// ── Global auth hook ──────────────────────────────────────────────────────────
+// ── Hook de autenticação global ───────────────────────────────────────────────
 fastify.addHook('onRequest', async (req, reply) => {
   const path = req.url.split('?')[0];
 
+  // Rotas que não precisam de autenticação
   if (
-    path === '/health' ||
-    path === '/config' ||
-    path.startsWith('/uploads/') ||
-    path === '/foundry/push-actors'
-  ) {
-    return;
-  }
+    path === '/health'              ||
+    path === '/config'              ||
+    path === '/ws'                  ||
+    path.startsWith('/uploads/')    ||
+    path === '/foundry/push-actors'   // autenticado por X-Nimrod-Key na rota
+  ) return;
 
-  // Para todas as outras rotas (incluindo /api/* e /ws já tratado acima)
   await cfAuthMiddleware(req, reply);
 });
 
-// ── Authenticated routes ──────────────────────────────────────────────────────
+// ── Rotas autenticadas ────────────────────────────────────────────────────────
 await fastify.register(userRoutes);
 await fastify.register(postRoutes);
 await fastify.register(missionRoutes);
@@ -134,10 +123,11 @@ await fastify.register(profileRoutes);
 try {
   await runMigrations();
   startCemeteryDecay();
-  //startFoundrySync();
-  //await pullFoundryActors();
-  await fastify.listen({ port: parseInt(process.env.PORT) || 3001, host: '0.0.0.0' });
-  console.log('🎲 foundry-nimrod backend running on port', process.env.PORT || 3001);
+  await fastify.listen({
+    port: parseInt(process.env.PORT) || 3001,
+    host: '0.0.0.0',   // necessário para Docker — proteção é feita pelo Tunnel + firewall
+  });
+  console.log('🎲 Nimrod backend running on port', process.env.PORT || 3001);
 } catch (err) {
   fastify.log.error(err);
   process.exit(1);

@@ -5,16 +5,16 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test:     ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
-      timeout: 5s
-      retries: 10
+      timeout:  5s
+      retries:  10
 
   backend:
     build: ./backend
@@ -26,29 +26,48 @@ services:
       - .env
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      PORT: 3001
-      NODE_ENV: production
-      UPLOADS_DIR: /app/uploads
-      # DEV_USER_EMAIL: test@local.dev   # descomente só quando precisar testar localmente
+      PORT:         3001
+      NODE_ENV:     production
+      UPLOADS_DIR:  /app/uploads
+      # DEV_USER_EMAIL: test@local.dev   ← descomente APENAS para testar localmente
+      #                                    NUNCA deixar ativo em produção
     volumes:
-      - "/c/Users/rauiv/AppData/Local/FoundryVTT/Data:/foundrydata/Data"
       - uploads:/app/uploads
-      - ./backend/src:/app/src          # ← Hot reload (muito útil no seu notebook)
-    ports:
-      - "3001:3001"
+    # PRODUÇÃO: porta 3001 NÃO exposta — o Cloudflare Tunnel acessa via rede
+    # interna do Docker (http://backend:3001). Expor a porta permitiria bypass
+    # do Cloudflare Access.
+    #
+    # Para depurar localmente (fora de produção), descomente temporariamente:
+    # ports:
+    #   - "127.0.0.1:3001:3001"   ← 127.0.0.1 garante que só o host local acessa
 
   frontend:
-    build: 
+    build:
       context: ./frontend
       args:
-        - VITE_API_BASE=http://backend:3001   # Passa na hora do build
+        - VITE_API_BASE=/api
     restart: unless-stopped
     depends_on:
       - backend
+    # PRODUÇÃO: porta 8088 também não precisa ser exposta se o Tunnel
+    # aponta diretamente para este container. Comente se for o caso.
     ports:
-      - "8088:80"                          # Boa escolha (evita conflito com porta 80)
+      - "127.0.0.1:8088:80"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    env_file:
+      - .env
     environment:
-      - VITE_API_BASE=http://backend:3001   # Backup (caso precise)
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - backend
+      - frontend
+    # cloudflared fica na mesma rede Docker que backend e frontend,
+    # então acessa http://backend:3001 e http://frontend:80 diretamente,
+    # sem precisar de portas expostas.
 
 volumes:
   pgdata:

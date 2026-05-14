@@ -1,18 +1,28 @@
 /**
  * app.js — Fastify application factory.
+ *
+ * Usado APENAS para testes de integração.
+ * O servidor de produção usa src/index.js diretamente.
+ *
+ * Rotas disponíveis aqui:
+ *   GET  /health
+ *   GET  /foundry/launch
+ *   POST /nimrod/verify
+ *
+ * O middleware de autenticação completo (com upsert no PostgreSQL) fica em
+ * src/middleware/auth.js e é usado pelo index.js de produção. Aqui usamos
+ * uma versão simplificada compatível com testes (mockUser / DEV_USER_EMAIL).
  */
 
 import Fastify from 'fastify';
-
 import { signFoundryToken, verifyFoundryToken } from './services/foundryAuth.js';
 import { resolveFoundryMapping } from './services/foundryMap.js';
-import { pool } from './db/index.js';   // ← Importe o pool diretamente
 
 const {
-  NODE_ENV = 'development',
+  NODE_ENV    = 'development',
   DEV_USER_EMAIL,
-  DEV_USER_NAME = 'Dev User',
-  DEV_USER_ROLE = 'PLAYER',
+  DEV_USER_NAME  = 'Dev User',
+  DEV_USER_ROLE  = 'PLAYER',
   FOUNDRY_URL,
   FOUNDRY_JWT_SECRET,
 } = process.env;
@@ -23,23 +33,7 @@ if (!FOUNDRY_JWT_SECRET) {
   throw new Error('FOUNDRY_JWT_SECRET is required');
 }
 
-// ====================== UPSERT USER ======================
-async function upsertUser(email, name, role = 'PLAYER') {
-  const sql = `
-    INSERT INTO users (email, name, role)
-    VALUES ($1, $2, $3)
-    ON CONFLICT (email) 
-    DO UPDATE 
-      SET name = EXCLUDED.name,
-          role = EXCLUDED.role
-    RETURNING *`;
-
-  const { rows } = await pool.query(sql, [email, name, role]);  // ← usando pool.query
-  return rows[0];
-}
-
-// ====================== BUILD ======================
-export async function build({ mockUser = null, logger = false } = {}) {
+export async function build({ mockUser = null, mockDb = null, logger = false } = {}) {
   const fastify = Fastify({ logger });
 
   fastify.setErrorHandler((error, request, reply) => {
@@ -49,65 +43,78 @@ export async function build({ mockUser = null, logger = false } = {}) {
     });
   });
 
-  // ====================== AUTHENTICATE ======================
-  fastify.decorate('authenticate', async (request, reply) => {
-    // Mock (testes)
-    if (mockUser?.email) {
-      request.user = mockUser;
+  // ── DB ─────────────────────────────────────────────────────────────────────
+  const dbPool = mockDb ?? (await import('./db/index.js')).pool;
+
+  // ── Auth ───────────────────────────────────────────────────────────────────
+  fastify.addHook('preHandler', async (req, reply) => {
+    // Testes: injeta usuário direto
+    if (mockUser) {
+      req.user = mockUser;
       return;
     }
 
-    // Desenvolvimento
+    // Desenvolvimento local
     if (!IS_PROD && DEV_USER_EMAIL) {
-      request.user = await upsertUser(DEV_USER_EMAIL, DEV_USER_NAME, DEV_USER_ROLE);
+      req.user = {
+        email: DEV_USER_EMAIL,
+        role:  DEV_USER_ROLE,
+        name:  DEV_USER_NAME,
+      };
       return;
     }
 
-    // Produção - Cloudflare
-    const email = request.headers['cf-access-authenticated-user-email'];
+    // Produção: header injetado pelo Cloudflare Access via Tunnel
+    const email = req.headers['cf-access-authenticated-user-email']?.trim().toLowerCase();
     if (!email) {
-      return reply.code(401).send({ error: 'Unauthorized - Cloudflare Access required' });
+      return reply.code(401).send({ error: 'Unauthorized' });
     }
-
-    if (!request.headers['cf-ray']) {
-      return reply.code(403).send({ error: 'Direct access forbidden' });
-    }
-
-    const name = request.headers['cf-access-user-name']?.trim() || email.split('@')[0];
-    request.user = await upsertUser(email, name);
+    req.user = { email };
   });
 
-  // ====================== ROTAS PÚBLICAS ======================
-  fastify.get('/health', () => ({ status: 'ok' }));
-  
-  fastify.get('/api/config', async () => {
-    return {
-      // suas configurações públicas aqui
-      foundryUrl: FOUNDRY_URL,
-      isProd: IS_PROD,
+  // ── Rotas ──────────────────────────────────────────────────────────────────
+  fastify.get('/health', async () => ({ status: 'ok' }));
+
+  fastify.get('/foundry/launch', async (req, reply) => {
+    if (!req.user?.email) {
+      return reply.code(401).send({ error: 'Unauthorized' });
+    }
+
+    const foundryBaseUrl = (FOUNDRY_URL || 'https://foundry.example.com').replace(/\/$/, '');
+    const mapping        = await resolveFoundryMapping(dbPool, req.user.email);
+    const { role, world, actor_name } = mapping;
+
+    const payload = {
+      e:   req.user.email,
+      r:   role,
+      w:   world,
+      a:   actor_name || null,
+      exp: Math.floor(Date.now() / 1000) + 300,   // 5 minutos
     };
+
+    const token = signFoundryToken(payload, FOUNDRY_JWT_SECRET);
+    const url   = new URL(foundryBaseUrl);
+    url.searchParams.set('t', token);
+
+    return reply.send({ url: url.toString() });
   });
 
-  // ====================== ROTAS PROTEGIDAS ======================
-  fastify.register(async function protectedRoutes(f) {
-    f.addHook('preHandler', f.authenticate);
+  fastify.post('/nimrod/verify', async (req, reply) => {
+    const { token } = req.body ?? {};
+    if (!token) return reply.code(400).send({ error: 'token is required' });
 
-    f.get('/api/me', async (req) => ({
-      authenticated: true,
-      user: req.user,
-    }));
-
-    // Adicione aqui outras rotas /api/* que precisam de auth
-    // f.get('/api/online-users', ...)
+    try {
+      const payload = verifyFoundryToken(token, FOUNDRY_JWT_SECRET);
+      return reply.send({
+        email: payload.e,
+        role:  payload.r,
+        world: payload.w,
+        actor: payload.a ?? null,
+      });
+    } catch {
+      return reply.code(401).send({ error: 'Invalid token' });
+    }
   });
-
-  // ====================== Foundry Routes ======================
-  fastify.get('/foundry/launch', {
-    preHandler: fastify.authenticate,
-    handler: async (req, reply) => { ... } // mantenha sua lógica original
-  });
-
-  fastify.post('/nimrod/verify', async (req, reply) => { ... }); // sua lógica original
 
   await fastify.ready();
   return fastify;
