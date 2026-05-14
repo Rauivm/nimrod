@@ -39,8 +39,8 @@ services:
     # do Cloudflare Access.
     #
     # Para depurar localmente (fora de produção), descomente temporariamente:
-    # ports:
-    #   - "127.0.0.1:3001:3001"   ← 127.0.0.1 garante que só o host local acessa
+    ports:
+      - "127.0.0.1:3001:3001"   #← 127.0.0.1 garante que só o host local acessa
 
   frontend:
     build:
