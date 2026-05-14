@@ -17,7 +17,7 @@ export async function foundryRoutes(fastify) {
 
   // ── GET /foundry/launch ────────────────────────────────────────────────────
   fastify.get('/foundry/launch', async (req, reply) => {
-    const foundryBaseUrl = process.env.FOUNDRY_URL?.replace(/\/$/, '');
+    const foundryBaseUrl = (process.env.FOUNDRY_URL || process.env.FOUNDRY_PUBLIC_URL)?.replace(/\/$/, '');
     if (!foundryBaseUrl) {
       return reply.code(503).send({ error: 'Foundry URL is not configured on the server.' });
     }
@@ -112,7 +112,7 @@ export async function foundryRoutes(fastify) {
     const { path: assetPath } = req.query;
     if (!assetPath) return reply.code(400).send({ error: 'path is required' });
 
-    const foundryBase = process.env.FOUNDRY_URL?.replace(/\/$/, '');
+    const foundryBase = (process.env.FOUNDRY_URL || process.env.FOUNDRY_PUBLIC_URL)?.replace(/\/$/, '');
     if (!foundryBase) return reply.code(503).send({ error: 'FOUNDRY_URL not configured' });
 
     // Only allow relative paths (no external URLs via this proxy)

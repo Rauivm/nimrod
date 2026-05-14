@@ -24,8 +24,18 @@ const {
   DEV_USER_NAME  = 'Dev User',
   DEV_USER_ROLE  = 'PLAYER',
   FOUNDRY_URL,
+  FOUNDRY_PUBLIC_URL,
   FOUNDRY_JWT_SECRET,
 } = process.env;
+
+const INTERNAL_FOUNDRY_URL =
+  FOUNDRY_URL?.replace(/\/$/, '');
+
+const PUBLIC_FOUNDRY_URL =
+  (
+    FOUNDRY_PUBLIC_URL ||
+    FOUNDRY_URL
+  )?.replace(/\/$/, '');
 
 const IS_PROD = NODE_ENV === 'production';
 
@@ -80,7 +90,7 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
       return reply.code(401).send({ error: 'Unauthorized' });
     }
 
-    const foundryBaseUrl = (FOUNDRY_URL || 'https://foundry.example.com').replace(/\/$/, '');
+    const foundryBaseUrl = PUBLIC_FOUNDRY_URL;
     const mapping        = await resolveFoundryMapping(dbPool, req.user.email);
     const { role, world, actor_name } = mapping;
 
