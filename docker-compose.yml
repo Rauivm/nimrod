@@ -72,6 +72,8 @@ services:
 
   nginx:
     image: nginx:alpine
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     depends_on:
       - frontend
