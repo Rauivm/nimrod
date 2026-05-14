@@ -69,6 +69,15 @@ services:
     # então acessa http://backend:3001 e http://frontend:80 diretamente,
     # sem precisar de portas expostas.
 
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
 volumes:
   pgdata:
   uploads:
