@@ -72,8 +72,7 @@ services:
 
   nginx:
     image: nginx:alpine
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    network_mode: host   # Usa a rede do host para acessar backend e frontend via localhost
     restart: unless-stopped
     depends_on:
       - frontend
