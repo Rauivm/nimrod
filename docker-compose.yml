@@ -72,7 +72,7 @@ services:
 
   nginx:
     image: nginx:alpine
-    network_mode: host   # Usa a rede do host para acessar backend e frontend via localhost
+    #network_mode: host   # Usa a rede do host para acessar backend e frontend via localhost
     restart: unless-stopped
     extra_hosts:
       # Permite que o nginx acesse serviços no host Linux (ex: Foundry na :30001)
@@ -83,8 +83,8 @@ services:
       - backend
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    ports:
-      - "127.0.0.1:8081:8081" 
+    #ports:
+    #  - "127.0.0.1:8081:8081" 
 
 volumes:
   pgdata:
