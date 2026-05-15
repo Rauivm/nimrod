@@ -77,7 +77,7 @@ services:
     extra_hosts:
       # Permite que o nginx acesse serviços no host Linux (ex: Foundry na :30001)
       # sem network_mode:host. Pi-hole na porta 80 do host não é afetado.
-      - "host-gateway:host-gateway"
+      - "host.docker.internal:host-gateway"
     depends_on:
       - frontend
       - backend
