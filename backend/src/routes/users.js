@@ -120,7 +120,7 @@ export async function userRoutes(fastify) {
 
 export async function configRoutes(fastify) {
   fastify.get('/config', { preHandler: [] }, async () => ({
-    foundryUrl: process.env.FOUNDRY_URL || process.env.FOUNDRY_PUBLIC_URL || null,
+    foundryUrl: process.env.FOUNDRY_PUBLIC_URL || process.env.FOUNDRY_URL || null,
   }));
 }
 
