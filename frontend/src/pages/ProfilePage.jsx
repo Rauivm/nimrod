@@ -5,6 +5,7 @@ import { useAuth, roleLabel } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
 import CharacterCard from '../components/CharacterCard.jsx';
 import LinkCharacterModal from '../components/LinkCharacterModal.jsx';
+import { optimizeImageFile } from '../lib/imageOptimization.js';
 import { Camera, Plus, RefreshCw, ChevronDown, ChevronUp, Shield, Swords } from 'lucide-react';
 
 // ── Avatar upload ─────────────────────────────────────────────────────────────
@@ -25,9 +26,10 @@ function AvatarUpload({ avatarUrl, displayName, isOwn, onUploaded }) {
 
     setLoading(true);
     try {
+      const uploadFile = await optimizeImageFile(file);
       const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/me/avatar', { method: 'POST', body: fd });
+      fd.append('file', uploadFile);
+      const res = await fetch('/api/me/avatar', { method: 'PATCH', body: fd });
       if (!res.ok) throw new Error('Upload falhou');
       const data = await res.json();
       onUploaded?.(data.avatarUrl);
@@ -179,6 +181,7 @@ export default function ProfilePage() {
     setSyncResult(null);
 
     try {
+      const result = await api.post('/foundry/actors/sync', {});
       await loadProfile();
 
       setSyncResult(
@@ -207,8 +210,8 @@ export default function ProfilePage() {
   if (!profile) return null;
 
   const { user, characters, stats } = profile;
-  const activeChars  = characters.filter(c => !c.retired);
-  const retiredChars = characters.filter(c => c.retired);
+  const activeChars  = characters.filter(c => c.active && !c.retired);
+  const retiredChars = characters.filter(c => c.retired || !c.active);
 
   return (
     <div className="profile-root">

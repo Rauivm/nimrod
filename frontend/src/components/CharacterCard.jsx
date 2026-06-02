@@ -29,11 +29,9 @@ function TokenImg({ src, name, size = 64 }) {
 
   // Proxy Foundry images through our backend to avoid CORS
   const proxied = src
-    ? src.startsWith('http')
-      ? `/api/foundry/asset?path=${encodeURIComponent(src)}`
-      : src.startsWith('/')
-        ? src
-        : `/api/foundry/asset?path=${encodeURIComponent(src)}`
+    ? src.startsWith('/uploads/')
+      ? src
+      : `/api/foundry/assets?path=${encodeURIComponent(src.startsWith('http') ? new URL(src).pathname : src)}`
     : null;
 
   return (
@@ -52,7 +50,7 @@ function TokenImg({ src, name, size = 64 }) {
 }
 
 // ── Inline biography editor ───────────────────────────────────────────────────
-function BiographyEditor({ charId, initial, onSaved }) {
+function BiographyEditor({ charId, userId, initial, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue]     = useState(initial ?? '');
   const [loading, setLoading] = useState(false);
@@ -81,7 +79,7 @@ function BiographyEditor({ charId, initial, onSaved }) {
   const save = async () => {
     setLoading(true);
     try {
-      await api.patch(`/players/_/characters/${charId}`, { biography: value });
+      await api.patch(`/players/${userId}/characters/${charId}`, { biography: value });
       onSaved?.(value);
       setEditing(false);
     } catch (err) { alert(err.message); }
@@ -179,6 +177,7 @@ export default function CharacterCard({ character: initialChar, isOwn, isGM, onU
             ? (
               <BiographyEditor
                 charId={char.id}
+                userId={char.userId}
                 initial={char.biography}
                 onSaved={handleBioSaved}
               />

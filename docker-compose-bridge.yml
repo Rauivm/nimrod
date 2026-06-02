@@ -8,7 +8,7 @@ services:
     environment:
       REDIS_HOST:      redis
       REDIS_PORT:      6379
-      NIMROD_URL:      https://nimrod.raui.uk/foundry/push-actors
+      NIMROD_URL:      https://nimrod.raui.uk/api/foundry/push-actors
       FOUNDRY_API_KEY: ${FOUNDRY_API_KEY}
     ports:
       - "127.0.0.1:3999:3999"   # localhost only — critical
@@ -25,7 +25,7 @@ services:
     environment:
       REDIS_HOST:      redis
       REDIS_PORT:      6379
-      NIMROD_URL:      https://nimrod.raui.uk/foundry/push-actors
+      NIMROD_URL:      https://nimrod.raui.uk/api/foundry/push-actors
       FOUNDRY_API_KEY: ${FOUNDRY_API_KEY}
     depends_on:
       redis:

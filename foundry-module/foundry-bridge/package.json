@@ -2,7 +2,7 @@
   "name": "foundry-bridge",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node index.js",
     "start:worker": "node src/worker.js"
   },
   "dependencies": {

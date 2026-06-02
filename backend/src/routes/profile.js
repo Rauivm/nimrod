@@ -19,7 +19,6 @@ import { join, extname } from 'path';
 import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 import { query } from '../db/index.js';
-import { upsertFoundryActors } from '../services/foundrySync.js';
 import { broadcast } from '../ws/broadcast.js';
 
 const ALLOWED_IMG_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
@@ -50,8 +49,38 @@ function serializeChar(row, missionCount = 0) {
     retiredAt:     row.retired_at,
     lastSyncedAt:  row.last_synced_at,
     missionCount,
+    missionsCount: missionCount,
     userId:        row.user_id,
   };
+}
+
+async function uploadAvatar(req, reply) {
+  const data = await req.file();
+  if (!data) return reply.code(400).send({ error: 'No file uploaded' });
+
+  if (!ALLOWED_IMG_TYPES.has(data.mimetype)) {
+    return reply.code(400).send({ error: 'Only JPEG, PNG, WebP and GIF images are allowed' });
+  }
+
+  const ext      = extname(data.filename) || '.jpg';
+  const filename = `${req.user.id}-${randomUUID()}${ext}`;
+  const dir      = avatarsDir();
+  const dest     = join(dir, filename);
+
+  try {
+    await pipeline(data.file, createWriteStream(dest));
+  } catch {
+    return reply.code(500).send({ error: 'Upload failed' });
+  }
+
+  const avatarUrl = `/uploads/avatars/${filename}`;
+  const res = await query(
+    'UPDATE users SET avatar_url = $1 WHERE id = $2 RETURNING avatar_url',
+    [avatarUrl, req.user.id],
+  );
+
+  broadcast('AVATAR_UPDATED', { userId: req.user.id, avatarUrl });
+  return { avatarUrl: res.rows[0].avatar_url };
 }
 
 // ── Mission count helper ──────────────────────────────────────────────────────
@@ -78,7 +107,7 @@ export async function profileRoutes(fastify) {
     const { userId } = req.params;
 
     const userRes = await query(
-      `SELECT id, COALESCE(display_name, name) AS display_name, role, avatar_url
+      `SELECT id, COALESCE(display_name, name) AS display_name, role, avatar_url, created_at
        FROM users WHERE id = $1`,
       [userId],
     );
@@ -108,6 +137,7 @@ export async function profileRoutes(fastify) {
         displayName: u.display_name,
         role:        u.role,
         avatarUrl:   u.avatar_url ?? null,
+        createdAt:    u.created_at,
       },
       characters: charRes.rows.map(r => serializeChar(r, charMissionCounts[r.id] ?? 0)),
       stats,
@@ -206,6 +236,24 @@ export async function profileRoutes(fastify) {
     return char;
   });
 
+  fastify.patch('/players/:userId/characters/:charId/link', async (req, reply) => {
+    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
+    const { userId, charId } = req.params;
+
+    const res = await query(
+      `UPDATE player_characters
+       SET user_id = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [userId, charId],
+    );
+    if (!res.rows.length) return reply.code(404).send({ error: 'Character not found' });
+
+    const char = serializeChar(res.rows[0]);
+    broadcast('CHARACTER_UPDATED', { userId, character: char });
+    return char;
+  });
+
   // ── DELETE /players/:userId/characters/:id (GM only) ─────────────────────
   fastify.delete('/players/:userId/characters/:id', async (req, reply) => {
     if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
@@ -229,15 +277,6 @@ export async function profileRoutes(fastify) {
     );
     return res.rows.map(r => serializeChar(r));
   });
-
-  // ── POST /foundry/actors/sync (GM only) ───────────────────────────────────
-  // Triggers an immediate re-sync from actors.db.
-/*   fastify.post('/foundry/actors/sync', async (req, reply) => {
-    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
-
-    const result = await syncFoundryActors();
-    return reply.send(result);
-  }); */
 
   // ── POST /me/avatar ────────────────────────────────────────────────────────
   // Multipart upload for profile picture.
@@ -281,4 +320,6 @@ export async function profileRoutes(fastify) {
     broadcast('AVATAR_UPDATED', { userId: req.user.id, avatarUrl });
     return { avatarUrl: res.rows[0].avatar_url };
   });
+
+  fastify.patch('/me/avatar', uploadAvatar);
 }

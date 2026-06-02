@@ -32,6 +32,7 @@ import { userRoutes, configRoutes } from './routes/users.js';
 import { foundryRoutes } from './routes/foundry.js';
 import { profileRoutes } from './routes/profile.js';
 import { startCemeteryDecay } from './jobs/cemeteryDecay.js';
+import { startFoundryActorSyncJob } from './services/foundrySync.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
@@ -123,6 +124,7 @@ await fastify.register(profileRoutes);
 try {
   await runMigrations();
   startCemeteryDecay();
+  startFoundryActorSyncJob();
   await fastify.listen({
     port: parseInt(process.env.PORT) || 3001,
     host: '0.0.0.0',   // necessário para Docker — proteção é feita pelo Tunnel + firewall

@@ -35,7 +35,7 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
   const linkActor = async (actorId) => {
     setSubmitting(true);
     try {
-      await api.patch(`/players/${targetUserId}/characters/${actorId}`, { userId: targetUserId });
+      await api.patch(`/players/${targetUserId}/characters/${actorId}/link`, {});
       onLinked?.();
       onClose?.();
     } catch (err) { alert(err.message); }
@@ -56,7 +56,7 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
   };
 
   return (
-    <div className="lc-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="lc-overlay" role="presentation">
       <div className="lc-modal animate-in">
 
         <div className="lc-header">
@@ -99,7 +99,7 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
                   >
                     <div className="lc-actor-token">
                       {a.tokenImg
-                        ? <img src={`/api/foundry/asset?path=${encodeURIComponent(a.tokenImg)}`} alt={a.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
+                        ? <img src={`/api/foundry/assets?path=${encodeURIComponent(a.tokenImg)}`} alt={a.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
                         : <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: '#fff', fontSize: '16px' }}>{a.name[0]}</span>
                       }
                     </div>

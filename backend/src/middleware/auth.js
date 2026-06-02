@@ -32,7 +32,7 @@ export async function cfAuthMiddleware(request, reply) {
   const devEmail = process.env.DEV_USER_EMAIL?.trim();
   if (devEmail) {
     const devName = process.env.DEV_USER_NAME?.trim() || 'Dev User';
-    const devRole = process.env.DEV_USER_ROLE?.trim() || 'PLAYER';
+    const devRole = process.env.DEV_USER_ROLE?.trim() || 'GM';
     request.user  = await upsertUser(devEmail, devName, devRole, true);
     return;
   }
@@ -48,7 +48,12 @@ export async function cfAuthMiddleware(request, reply) {
   const cfName = request.headers['cf-access-user-name']?.trim();
   const name   = cfName || email.split('@')[0];
 
-  request.user = await upsertUser(email, name, 'PLAYER', false);
+  request.user = await upsertUser(
+    email,
+    name,
+    process.env.DEV_USER_ROLE ?? 'PLAYER',
+    false
+  );
 }
 
 async function upsertUser(email, name, role, forceRole) {

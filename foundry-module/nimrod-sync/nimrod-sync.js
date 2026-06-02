@@ -22,6 +22,17 @@ async function syncAllActors() {
   console.log(`[nimrod-sync] Full sync triggered for ${actors.length} actors.`);
 }
 
+Hooks.once('init', () => {
+  game.settings.register('nimrod-sync', 'bridgeUrl', {
+    name: 'Bridge URL',
+    hint: 'URL do Nimrod Bridge',
+    scope: 'world',
+    config: true,
+    type: String,
+    default: 'http://localhost:8081/bridge'
+  });
+});
+
 Hooks.once('ready', async () => {
   console.log('[nimrod-sync] Ready hook fired');
 

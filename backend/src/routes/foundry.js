@@ -1,6 +1,6 @@
 import { query } from '../db/index.js';
 import { signFoundryToken, verifyFoundryToken } from '../services/foundryAuth.js';
-//import { pullFoundryActors } from '../services/foundrySync.js';
+import { readFoundryActorsDb, syncFoundryActors, upsertFoundryActors } from '../services/foundrySync.js';
 
 /**
  * Foundry VTT integration routes.
@@ -14,6 +14,51 @@ import { signFoundryToken, verifyFoundryToken } from '../services/foundryAuth.js
  */
 
 export async function foundryRoutes(fastify) {
+  // ── GET /foundry/actors ───────────────────────────────────────────────────
+  // Internal read-only view of public actor fields. Falls back to cached DB
+  // rows when the Foundry data path is unavailable.
+  fastify.get('/foundry/actors', async (req) => {
+    const result = await readFoundryActorsDb();
+    if (result.available) {
+      return result.actors.map(a => ({
+        id: a.id,
+        name: a.name,
+        img: a.img,
+        tokenImg: a.tokenImg,
+        token: { img: a.tokenImg },
+        system: {
+          details: {
+            level: a.level,
+            xp: a.xp,
+            biography: a.biography,
+          },
+        },
+      }));
+    }
+
+    const cached = await query(
+      `SELECT foundry_actor_id AS id, name, portrait_img AS img, token_img,
+              level, xp, biography
+       FROM player_characters
+       WHERE foundry_actor_id IS NOT NULL
+       ORDER BY name ASC`,
+    );
+    return cached.rows.map(a => ({
+      id: a.id,
+      name: a.name,
+      img: a.img,
+      tokenImg: a.token_img,
+      token: { img: a.token_img },
+      system: {
+        details: {
+          level: a.level,
+          xp: a.xp,
+          biography: a.biography,
+        },
+      },
+      cached: true,
+    }));
+  });
 
   // ── GET /foundry/launch ────────────────────────────────────────────────────
   fastify.get('/foundry/launch', async (req, reply) => {
@@ -108,7 +153,7 @@ export async function foundryRoutes(fastify) {
   // The `path` param is a URL path as served by Foundry (e.g. /worlds/my-world/tokens/hero.png).
   // The asset is fetched from FOUNDRY_URL and streamed to the client.
   // NO filesystem access — works while Foundry is open.
-  fastify.get('/foundry/asset', async (req, reply) => {
+  async function proxyFoundryAsset(req, reply) {
     const { path: assetPath } = req.query;
     if (!assetPath) return reply.code(400).send({ error: 'path is required' });
 
@@ -145,7 +190,10 @@ export async function foundryRoutes(fastify) {
       if (err.name === 'AbortError') return reply.code(504).send({ error: 'Foundry asset request timed out' });
       return reply.code(502).send({ error: 'Could not reach Foundry' });
     }
-  });
+  }
+
+  fastify.get('/foundry/asset', proxyFoundryAsset);
+  fastify.get('/foundry/assets', proxyFoundryAsset);
   // ── POST /foundry/push-actors ──────────────────────────────────────────────
   fastify.options('/foundry/push-actors', async (req, reply) => {
     reply
@@ -183,10 +231,14 @@ export async function foundryRoutes(fastify) {
       return reply.code(400).send({ error: 'actors array is required and must be non-empty' });
     }
 
-    const { upsertFoundryActors } = await import('../services/foundrySync.js');
     const result = await upsertFoundryActors(actors);
 
     req.log.info({ ...result }, 'push-actors complete');
     return { ok: true, ...result };
+  });
+
+  fastify.post('/foundry/actors/sync', async (req, reply) => {
+    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
+    return syncFoundryActors();
   });
 }

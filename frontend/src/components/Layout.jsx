@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useAuth, roleLabel } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
 import { api } from '../lib/api.js';
-import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil } from 'lucide-react';
+import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil, UserCircle } from 'lucide-react';
 import EditDisplayNameModal from './EditDisplayNameModal.jsx';
 
 function FoundryButton({ user }) {
@@ -79,6 +79,9 @@ export default function Layout() {
             </NavLink>
             <NavLink to="/maps" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
               <Map size={14} /><span>Mapas</span>
+            </NavLink>
+            <NavLink to="/profile" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
+              <UserCircle size={14} /><span>Perfil</span>
             </NavLink>
           </nav>
 

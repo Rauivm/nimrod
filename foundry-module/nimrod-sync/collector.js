@@ -9,8 +9,17 @@
  * EXPORTA serializeActor para uso em nimrod-sync.js (syncAllActors)
  */
 
-const BRIDGE_URL  = 'http://127.0.0.1:3999';
+// Usa a origem da própria página para evitar Mixed Content (HTTP em HTTPS)
+// e ERR_CONNECTION_REFUSED. O reverse proxy roteia /bridge/* → 127.0.0.1:3999.
+const BRIDGE_URL  = `${window.location.origin}/bridge`;
 const DEBOUNCE_MS = 2_000;
+
+function getBridgeUrl() {
+  return game.settings.get(
+    'nimrod-sync',
+    'bridgeUrl'
+  );
+}
 
 const BUFFER       = new Map();
 let   flushTimeout = null;
@@ -91,6 +100,7 @@ export class SyncCollector {
     if (!actors.length) return;
 
     try {
+      const BRIDGE_URL = 'http://localhost:8081/bridge';
       const res = await fetch(`${BRIDGE_URL}/sync`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },

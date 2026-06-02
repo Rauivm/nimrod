@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useWs } from '../contexts/WsContext.jsx';
 import { api } from '../lib/api.js';
 import { useAuth, roleLabel } from '../contexts/AuthContext.jsx';
-import { Crown, ChevronDown } from 'lucide-react';
+import { Crown, ChevronDown, Link } from 'lucide-react';
+import LinkCharacterModal from './LinkCharacterModal.jsx';
 
 function PlayerAvatar({ name, role }) {
   // Support both `displayName` (new) and `name` (legacy) field names.
@@ -73,6 +74,7 @@ export function OnlinePlayersPanel() {
   const { user } = useAuth();
   const { on, connected } = useWs();
   const [players, setPlayers] = useState([]);
+  const [linkTarget, setLinkTarget] = useState(null);
 
   const fetchOnline = useCallback(async () => {
     try {
@@ -130,13 +132,30 @@ export function OnlinePlayersPanel() {
 
                 {/* GM can change any player's role, including themselves */}
                 {isGM && (
-                  <RoleMenu player={p} onPromoted={fetchOnline} />
+                  <div className="op-gm-actions">
+                    <button
+                      className="link-char-trigger"
+                      onClick={() => setLinkTarget(p)}
+                      title="Vincular personagem"
+                    >
+                      <Link size={11} />
+                    </button>
+                    <RoleMenu player={p} onPromoted={fetchOnline} />
+                  </div>
                 )}
               </div>
             );
           })
         )}
       </div>
+
+      {linkTarget && (
+        <LinkCharacterModal
+          targetUserId={linkTarget.id}
+          onClose={() => setLinkTarget(null)}
+          onLinked={() => setLinkTarget(null)}
+        />
+      )}
 
       <style>{`
         .op-panel {
@@ -227,6 +246,14 @@ export function OnlinePlayersPanel() {
           border: 1px solid var(--gold-dim);
           border-radius: 2px; flex-shrink: 0;
         }
+        .op-gm-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+        .link-char-trigger {
+          display: flex; align-items: center; justify-content: center;
+          color: var(--text-faint); background: none;
+          border: 1px solid transparent; border-radius: var(--radius);
+          padding: 4px; transition: all 0.15s;
+        }
+        .link-char-trigger:hover { color: var(--gold); border-color: var(--gold-dim); background: rgba(201,168,76,0.06); }
 
         /* ── Role menu ─────────────────────────────────────── */
         .role-menu-wrap {
