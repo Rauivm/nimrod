@@ -100,7 +100,7 @@ export class SyncCollector {
     if (!actors.length) return;
 
     try {
-      const BRIDGE_URL = 'http://localhost:8081/bridge';
+      const BRIDGE_URL = getBridgeUrl();
       const res = await fetch(`${BRIDGE_URL}/sync`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
