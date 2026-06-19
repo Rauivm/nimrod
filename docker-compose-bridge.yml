@@ -50,7 +50,7 @@ services:
 networks:
   bridge-internal:
     driver: bridge
-    internal: true   # no external internet access for Redis
+#    internal: true   # no external internet access for Redis
 
 volumes:
   redis-data:
