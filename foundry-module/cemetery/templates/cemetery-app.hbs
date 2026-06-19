@@ -1,0 +1,447 @@
+{{!-- cemetery-app.hbs — Cemetery Module Main Template --}}
+<div class="cemetery-app-root">
+
+{{!-- ═══════════════════════════════════════════════════
+     SHARED: Header + Tabs  (shown on registry & gallery)
+════════════════════════════════════════════════════ --}}
+{{#unless (cem_eq view "detail")}}
+
+<div class="cem-header">
+  <div class="cem-header-inner">
+    <div class="cem-header-icon">🏛️</div>
+    <div class="cem-header-text">
+      <h1>{{memorialName}}</h1>
+      <p>In memoriam · {{stats.total}} registros</p>
+    </div>
+    {{#if isGM}}
+    <button class="cem-btn cem-btn-ghost cem-header-export" data-action="exportJSON">
+      <i class="fas fa-file-export"></i> {{i18n.exportJSON}}
+    </button>
+    {{/if}}
+  </div>
+</div>
+
+{{!-- Tabs --}}
+<div class="cem-tabs">
+  <button class="cem-tab {{#if (cem_eq view 'registry')}}active{{/if}}"
+          data-action="showRegistry">
+    <i class="fas fa-list"></i> Registro
+  </button>
+  <button class="cem-tab {{#if (cem_eq view 'gallery')}}active{{/if}}"
+          data-action="showGallery">
+    <i class="fas fa-landmark"></i> Memorial
+  </button>
+  {{!-- Stats inline in tab bar --}}
+  <div class="cem-tab-stats">
+    <span class="cem-tab-stat"><i class="fas fa-skull"></i> {{stats.total}}</span>
+    <span class="cem-tab-stat cem-tab-stat-pc"><i class="fas fa-user"></i> {{stats.pc}}</span>
+    <span class="cem-tab-stat cem-tab-stat-npc"><i class="fas fa-ghost"></i> {{stats.npc}}</span>
+    <span class="cem-tab-stat cem-tab-stat-restored"><i class="fas fa-heart"></i> {{stats.restored}}</span>
+  </div>
+</div>
+
+{{/unless}}
+
+{{!-- ═══════════════════════════════════════════════════
+     VIEW: REGISTRY
+════════════════════════════════════════════════════ --}}
+{{#if (cem_eq view "registry")}}
+
+<div class="cem-registry">
+
+  {{!-- Registry toolbar --}}
+  <div class="cem-reg-toolbar">
+    <div class="cem-search-wrap">
+      <span class="cem-search-icon"><i class="fas fa-search"></i></span>
+      <input class="cem-reg-search" type="text"
+             placeholder="Buscar personagem..." value="{{regSearch}}">
+    </div>
+    <div class="cem-filters">
+      <button class="cem-reg-filter-btn {{#if (cem_eq regTypeFilter 'all')}}active{{/if}}"
+              data-filter="all">Todos</button>
+      <button class="cem-reg-filter-btn {{#if (cem_eq regTypeFilter 'pc')}}active{{/if}}"
+              data-filter="pc">PCs</button>
+      <button class="cem-reg-filter-btn {{#if (cem_eq regTypeFilter 'npc')}}active{{/if}}"
+              data-filter="npc">NPCs</button>
+    </div>
+  </div>
+
+  {{!-- Registry table --}}
+  <div class="cem-reg-table-wrap">
+    <table class="cem-reg-table">
+      <thead>
+        <tr>
+          <th class="col-portrait"></th>
+          <th class="col-name">Nome</th>
+          <th class="col-type">Tipo</th>
+          <th class="col-status">Status</th>
+          <th class="col-actions">Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each registryActors}}
+        <tr class="cem-reg-row {{#if dead}}is-dead{{/if}} {{#if restored}}is-restored{{/if}}"
+            data-actor-id="{{id}}">
+
+          {{!-- Portrait --}}
+          <td class="col-portrait">
+            <div class="cem-reg-portrait {{#if dead}}dead{{/if}} {{#if restored}}restored{{/if}}">
+              <img src="{{img}}" alt="{{name}}">
+              {{#if dead}}
+              <div class="cem-reg-portrait-dead-overlay">
+                <i class="fas fa-skull"></i>
+              </div>
+              {{/if}}
+              {{#if restored}}
+              <div class="cem-reg-portrait-restored-overlay">
+                <i class="fas fa-heart"></i>
+              </div>
+              {{/if}}
+            </div>
+          </td>
+
+          {{!-- Name --}}
+          <td class="col-name">
+            <div class="cem-reg-name {{#if dead}}dead{{/if}}">{{name}}</div>
+            {{#if memorial.placeOfDeath}}
+            <div class="cem-reg-name-sub">
+              <i class="fas fa-map-marker-alt"></i> {{memorial.placeOfDeath}}
+            </div>
+            {{/if}}
+          </td>
+
+          {{!-- Type --}}
+          <td class="col-type">
+            <span class="cem-type-badge {{#if isPC}}pc{{else}}npc{{/if}}">
+              {{typeLabel}}
+            </span>
+          </td>
+
+          {{!-- Status --}}
+          <td class="col-status">
+            {{#if restored}}
+              <span class="cem-status-badge restored">
+                <i class="fas fa-heart"></i> Ressuscitado
+              </span>
+            {{else if dead}}
+              <span class="cem-status-badge dead">
+                <i class="fas fa-skull"></i> Falecido
+              </span>
+            {{else}}
+              <span class="cem-status-badge alive">
+                <i class="fas fa-circle"></i> Vivo
+              </span>
+            {{/if}}
+          </td>
+
+          {{!-- Actions --}}
+          <td class="col-actions">
+            {{#if dead}}
+              {{!-- Already dead: show Resurrect --}}
+              <button class="cem-reg-btn cem-reg-btn-restore"
+                      data-action="restoreActorRegistry"
+                      title="Ressuscitar">
+                <i class="fas fa-heartbeat"></i> Ressuscitar
+              </button>
+            {{else if restored}}
+              {{!-- Restored: no further action needed --}}
+              <span class="cem-reg-no-action">—</span>
+            {{else}}
+              {{!-- Alive: show Mark Dead --}}
+              <button class="cem-reg-btn cem-reg-btn-dead"
+                      data-action="markDead"
+                      title="Enviar ao Memorial">
+                <i class="fas fa-skull"></i> Marcar Morto
+              </button>
+            {{/if}}
+          </td>
+
+        </tr>
+        {{else}}
+        <tr>
+          <td colspan="5" class="cem-reg-empty">
+            <i class="fas fa-search"></i> Nenhum personagem encontrado.
+          </td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+{{!-- /registry --}}
+
+{{!-- ═══════════════════════════════════════════════════
+     VIEW: GALLERY
+════════════════════════════════════════════════════ --}}
+{{else if (cem_eq view "gallery")}}
+
+{{!-- Stats Bar --}}
+<div class="cem-stats">
+  <div class="cem-stat">
+    <div class="cem-stat-value">{{stats.total}}</div>
+    <div class="cem-stat-label">{{i18n.statTotal}}</div>
+  </div>
+  <div class="cem-stat">
+    <div class="cem-stat-value">{{stats.pc}}</div>
+    <div class="cem-stat-label">{{i18n.statPC}}</div>
+  </div>
+  <div class="cem-stat">
+    <div class="cem-stat-value">{{stats.npc}}</div>
+    <div class="cem-stat-label">{{i18n.statNPC}}</div>
+  </div>
+  <div class="cem-stat">
+    <div class="cem-stat-value">{{stats.restored}}</div>
+    <div class="cem-stat-label">{{i18n.statRestored}}</div>
+  </div>
+</div>
+
+{{!-- Toolbar --}}
+<div class="cem-toolbar">
+  <div class="cem-search-wrap">
+    <span class="cem-search-icon"><i class="fas fa-search"></i></span>
+    <input class="cem-search" type="text"
+           placeholder="{{i18n.search}}" value="{{search}}">
+  </div>
+  <div class="cem-filters">
+    <button class="cem-filter-btn {{#if (cem_eq typeFilter 'all')}}active{{/if}}"
+            data-filter="all" data-group="type">{{i18n.filterAll}}</button>
+    <button class="cem-filter-btn {{#if (cem_eq typeFilter 'pc')}}active{{/if}}"
+            data-filter="pc" data-group="type">{{i18n.filterPC}}</button>
+    <button class="cem-filter-btn {{#if (cem_eq typeFilter 'npc')}}active{{/if}}"
+            data-filter="npc" data-group="type">{{i18n.filterNPC}}</button>
+    <span class="cem-filter-sep"></span>
+    <button class="cem-filter-btn {{#if (cem_eq statusFilter 'dead')}}active{{/if}}"
+            data-filter="dead" data-group="status">{{i18n.filterDead}}</button>
+    <button class="cem-filter-btn {{#if (cem_eq statusFilter 'restored')}}active{{/if}}"
+            data-filter="restored" data-group="status">{{i18n.filterRestored}}</button>
+  </div>
+  <select class="cem-sort-select">
+    <option value="date" {{#if (cem_eq sortMode "date")}}selected{{/if}}>{{i18n.sortByDate}}</option>
+    <option value="name" {{#if (cem_eq sortMode "name")}}selected{{/if}}>{{i18n.sortByName}}</option>
+  </select>
+</div>
+
+{{!-- Gallery grid --}}
+<div class="cem-gallery">
+  <div class="cem-grid">
+    {{#if cards.length}}
+      {{#each cards}}
+      <div class="cem-card {{#if restored}}is-restored{{/if}}" data-actor-id="{{id}}">
+        <div class="cem-card-portrait">
+          <img src="{{cem_defaultImg img}}" alt="{{name}}">
+          <div class="cem-card-portrait-overlay"></div>
+          <div class="cem-card-badge {{#if isPC}}pc{{else}}npc{{/if}}">{{typeLabel}}</div>
+          {{#if restored}}
+          <div class="cem-restored-ribbon">↑</div>
+          {{/if}}
+        </div>
+        <div class="cem-card-body">
+          <h3 class="cem-card-name" title="{{name}}">{{name}}</h3>
+          {{#if level}}
+          <p class="cem-card-meta">
+            <i class="fas fa-star"></i>
+            {{../i18n.level}} {{level}}{{#if class}} · {{class}}{{/if}}
+          </p>
+          {{/if}}
+          {{#if placeOfDeath}}
+          <p class="cem-card-meta">
+            <i class="fas fa-map-marker-alt"></i> {{placeOfDeath}}
+          </p>
+          {{/if}}
+          {{#if restored}}
+          <p class="cem-card-meta" style="color:var(--cem-green)">
+            <i class="fas fa-heart"></i> {{../i18n.restoredLabel}}
+          </p>
+          {{/if}}
+          <p class="cem-card-date">
+            <i class="fas fa-skull-crossbones"></i> {{dateFormatted}}
+          </p>
+        </div>
+        {{#if ../isGM}}
+        <div class="cem-card-actions">
+          <button class="cem-card-action" data-action="viewDetail" title="{{../i18n.viewDetails}}">
+            <i class="fas fa-eye"></i>
+          </button>
+          <button class="cem-card-action" data-action="editEntry" title="{{../i18n.edit}}">
+            <i class="fas fa-pen"></i>
+          </button>
+          {{#unless restored}}
+          <button class="cem-card-action restore" data-action="restoreEntry" title="{{../i18n.restore}}">
+            <i class="fas fa-heartbeat"></i>
+          </button>
+          {{/unless}}
+          <button class="cem-card-action remove" data-action="removeEntry" title="{{../i18n.remove}}">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        {{else}}
+        <div class="cem-card-actions">
+          <button class="cem-card-action" data-action="viewDetail"
+                  style="flex:none;width:100%">
+            <i class="fas fa-eye"></i> {{../i18n.viewDetails}}
+          </button>
+        </div>
+        {{/if}}
+      </div>
+      {{/each}}
+    {{else}}
+      <div class="cem-empty">
+        <div class="cem-empty-icon">🏛️</div>
+        <p>{{i18n.noResults}}</p>
+      </div>
+    {{/if}}
+  </div>
+</div>
+{{!-- /gallery --}}
+
+{{!-- ═══════════════════════════════════════════════════
+     VIEW: DETAIL
+════════════════════════════════════════════════════ --}}
+{{else}}
+{{#with detail}}
+<div class="cem-detail {{#if restored}}is-restored{{/if}}">
+
+  <div class="cem-detail-header">
+    <button class="cem-detail-back" data-action="backToGallery">
+      <i class="fas fa-arrow-left"></i> {{../i18n.back}}
+    </button>
+    <span class="cem-detail-title">{{name}}</span>
+    {{#if ../isGM}}
+    <div style="display:flex;gap:6px">
+      <button class="cem-btn cem-btn-ghost" data-action="editEntry" data-actor-id="{{id}}">
+        <i class="fas fa-pen"></i> {{../i18n.edit}}
+      </button>
+      {{#unless restored}}
+      <button class="cem-btn cem-btn-restore" data-action="restoreEntry" data-actor-id="{{id}}">
+        <i class="fas fa-heartbeat"></i> {{../i18n.restore}}
+      </button>
+      {{/unless}}
+      <button class="cem-btn cem-btn-danger" data-action="removeEntry" data-actor-id="{{id}}">
+        <i class="fas fa-times"></i> {{../i18n.remove}}
+      </button>
+    </div>
+    {{/if}}
+  </div>
+
+  <div class="cem-detail-body">
+    <div class="cem-detail-hero">
+      <div class="cem-detail-portrait-bg"
+           style="background-image:url('{{cem_defaultImg img}}')"></div>
+      <div class="cem-detail-hero-overlay"></div>
+      <div class="cem-detail-portrait">
+        <img src="{{cem_defaultImg img}}" alt="{{name}}">
+      </div>
+      <div class="cem-detail-hero-info">
+        <h2 class="cem-detail-hero-name">{{name}}</h2>
+        <div class="cem-detail-hero-sub">
+          <span class="cem-detail-chip {{#if isPC}}type-pc{{else}}type-npc{{/if}}">
+            {{typeLabel}}
+          </span>
+          {{#if restored}}
+          <span class="cem-detail-chip status-restored">
+            <i class="fas fa-heart"></i> {{../i18n.restoredLabel}}
+          </span>
+          {{else}}
+          <span class="cem-detail-chip status-dead">
+            <i class="fas fa-skull"></i> {{../i18n.statusDead}}
+          </span>
+          {{/if}}
+          {{#if level}}
+          <span class="cem-detail-chip type-npc">
+            {{../i18n.level}} {{level}}
+          </span>
+          {{/if}}
+        </div>
+      </div>
+    </div>
+
+    <div class="cem-detail-sections">
+      <div class="cem-detail-section">
+        <div class="cem-section-title"><i class="fas fa-user"></i> Informações</div>
+        {{#if class}}
+        <div class="cem-detail-field">
+          <div class="cem-field-label">{{../i18n.class_}}</div>
+          <div class="cem-field-value">{{class}}</div>
+        </div>
+        {{/if}}
+        {{#if race}}
+        <div class="cem-detail-field">
+          <div class="cem-field-label">{{../i18n.race}}</div>
+          <div class="cem-field-value">{{race}}</div>
+        </div>
+        {{/if}}
+        <div class="cem-detail-field">
+          <div class="cem-field-label">{{../i18n.deathDate}}</div>
+          <div class="cem-field-value">{{dateFormatted}}</div>
+          <div class="cem-field-time">{{../i18n.timeSince}}: {{timeSinceDeath}}</div>
+        </div>
+        {{#if restored}}
+        <div class="cem-detail-field">
+          <div class="cem-field-label">{{../i18n.resurrectedDate}}</div>
+          <div class="cem-field-value" style="color:var(--cem-green)">
+            {{restoredFormatted}}
+          </div>
+        </div>
+        {{/if}}
+      </div>
+
+      <div class="cem-detail-section">
+        <div class="cem-section-title">
+          <i class="fas fa-skull-crossbones"></i> Circunstâncias
+        </div>
+        <div class="cem-detail-field">
+          <div class="cem-field-label">{{../i18n.causeOfDeath}}</div>
+          <div class="cem-field-value {{#unless causeOfDeath}}empty{{/unless}}">
+            {{cem_or causeOfDeath "—"}}
+          </div>
+        </div>
+        <div class="cem-detail-field">
+          <div class="cem-field-label">{{../i18n.placeOfDeath}}</div>
+          <div class="cem-field-value {{#unless placeOfDeath}}empty{{/unless}}">
+            {{cem_or placeOfDeath "—"}}
+          </div>
+        </div>
+        <div class="cem-detail-field">
+          <div class="cem-field-label">{{../i18n.killedBy}}</div>
+          <div class="cem-field-value {{#unless killedBy}}empty{{/unless}}">
+            {{cem_or killedBy "—"}}
+          </div>
+        </div>
+      </div>
+
+      {{#if lastWords}}
+      <div class="cem-detail-section full-width">
+        <div class="cem-section-title">
+          <i class="fas fa-comment"></i> {{../i18n.lastWords}}
+        </div>
+        <div class="cem-last-words">"{{lastWords}}"</div>
+      </div>
+      {{/if}}
+
+      {{#if memorialText}}
+      <div class="cem-detail-section full-width">
+        <div class="cem-section-title">
+          <i class="fas fa-scroll"></i> {{../i18n.memorialText}}
+        </div>
+        <div class="cem-memorial-text">{{memorialText}}</div>
+      </div>
+      {{/if}}
+
+      {{#if restoredNotes}}
+      <div class="cem-detail-section full-width">
+        <div class="cem-section-title" style="color:var(--cem-green)">
+          <i class="fas fa-heart"></i> {{../i18n.restoredNotes}}
+        </div>
+        <div class="cem-memorial-text" style="color:var(--cem-text-secondary)">
+          {{restoredNotes}}
+        </div>
+      </div>
+      {{/if}}
+    </div>
+  </div>
+</div>
+{{/with}}
+{{/if}}
+
+</div>{{!-- /cemetery-app-root --}}

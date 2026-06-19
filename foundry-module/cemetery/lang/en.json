@@ -1,0 +1,107 @@
+{
+  "CEMETERY": {
+    "ModuleName": "Cemetery",
+    "DefaultName": "Hall of the Fallen",
+    "Button": {
+      "Title": "Open Memorial"
+    },
+    "Context": {
+      "SendToMemorial": "Send to Memorial"
+    },
+    "Dialog": {
+      "TitleRegister": "Register in Memorial",
+      "TitleRestore": "Resurrect Character",
+      "TitleEdit": "Edit Memorial",
+      "CauseOfDeath": "Cause of Death",
+      "LastWords": "Last Words",
+      "PlaceOfDeath": "Place of Death",
+      "KilledBy": "Killed By",
+      "MemorialText": "Memorial Text",
+      "ResurrectionDate": "Resurrection Date",
+      "ResurrectionNotes": "Notes",
+      "Confirm": "Confirm",
+      "Cancel": "Cancel",
+      "Save": "Save",
+      "Restore": "Restore"
+    },
+    "Gallery": {
+      "Title": "Hall of the Fallen",
+      "SearchPlaceholder": "Search by name...",
+      "FilterAll": "All",
+      "FilterPC": "Characters",
+      "FilterNPC": "NPCs",
+      "FilterDead": "Dead Only",
+      "FilterRestored": "Resurrected",
+      "SortByDate": "Sort by Date",
+      "SortByName": "Sort by Name",
+      "NoResults": "No records found.",
+      "Export": "Export JSON",
+      "Settings": "Settings"
+    },
+    "Stats": {
+      "TotalFallen": "Total Fallen",
+      "TotalPC": "Characters",
+      "TotalNPC": "NPCs",
+      "TotalRestored": "Resurrected"
+    },
+    "Card": {
+      "Level": "Level",
+      "Class": "Class",
+      "Race": "Race",
+      "PlaceOfDeath": "Place of Death",
+      "ViewDetails": "View Details",
+      "Edit": "Edit",
+      "Restore": "Resurrect",
+      "Remove": "Remove from Memorial",
+      "Restored": "Returned from Death",
+      "Dead": "Dead",
+      "PC": "PC",
+      "NPC": "NPC"
+    },
+    "Detail": {
+      "TimeSinceDeath": "Time since death",
+      "DeathDate": "Date of Death",
+      "ResurrectionDate": "Resurrection Date",
+      "CauseOfDeath": "Cause of Death",
+      "LastWords": "Last Words",
+      "PlaceOfDeath": "Place of Death",
+      "KilledBy": "Killed By",
+      "MemorialText": "Memorial",
+      "ResurrectionNotes": "Resurrection Notes",
+      "Back": "Back",
+      "Edit": "Edit",
+      "Restore": "Resurrect",
+      "Remove": "Remove",
+      "Years": "years",
+      "Months": "months",
+      "Days": "days",
+      "Hours": "hours",
+      "Today": "Today"
+    },
+    "Settings": {
+      "MemorialName": "Memorial Name",
+      "MemorialNameHint": "Name displayed at the top of the memorial interface",
+      "AllowPlayers": "Allow players to view the memorial",
+      "AllowPlayersHint": "If enabled, players can open the memorial but cannot edit it",
+      "ShowInSidebar": "Show button in sidebar",
+      "NimrodSync": "Nimrod Sync: automatically sync deaths",
+      "NimrodSyncHint": "When enabled, sends isDead=true/false to Nimrod Sync on every death or resurrection",
+      "NimrodSyncUrl": "Nimrod Sync: Base URL",
+      "NimrodSyncUrlHint": "E.g.: https://my-nimrod.com/api — leave blank if not using Nimrod",
+      "NimrodSyncToken": "Nimrod Sync: Bearer Token",
+      "NimrodSyncTokenHint": "Authentication token for the Nimrod Sync API (optional)"
+    },
+    "Notification": {
+      "Registered": "{name} has been added to the memorial.",
+      "Removed": "{name} was removed from the memorial.",
+      "Restored": "{name} returned from the dead!",
+      "Exported": "Memorial exported successfully.",
+      "Error": "Error processing request.",
+      "AlreadyInMemorial": "{name} is already in the memorial."
+    },
+    "Confirm": {
+      "Remove": "Are you sure you want to remove {name} from the memorial? This cannot be undone.",
+      "RemoveTitle": "Remove from Memorial"
+    }
+  }
+}

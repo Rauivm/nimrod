@@ -1,0 +1,35 @@
+{
+  "id": "cemetery",
+  "title": "Cemetery",
+  "description": "Um memorial permanente para os personagens que caíram em combate durante a campanha. Registre heróis e vilões, preserve sua memória e honre seu legado.",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "13",
+    "verified": "13"
+  },
+  "authors": [
+    {
+      "name": "GM",
+      "email": ""
+    }
+  ],
+  "esmodules": [
+    "scripts/main.js"
+  ],
+  "styles": [
+    "styles/cemetery.css"
+  ],
+  "languages": [
+    {
+      "lang": "pt-BR",
+      "name": "Português (Brasil)",
+      "path": "lang/pt-BR.json"
+    },
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    }
+  ],
+  "flags": {}
+}

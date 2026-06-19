@@ -1,0 +1,47 @@
+{{!-- restore-dialog.hbs - Restore Actor Dialog Template --}}
+
+<div class="cem-dialog">
+
+  {{!-- Character header --}}
+  <div class="cem-dialog-actor-header" style="border-color:var(--cem-green-dim)">
+    <div class="cem-dialog-actor-portrait" style="border-color:var(--cem-green)">
+      <img src="{{entry.img}}" alt="{{entry.name}}">
+    </div>
+    <div>
+      <div class="cem-dialog-actor-name" style="color:var(--cem-green)">{{entry.name}}</div>
+      <div class="cem-dialog-actor-sub">Retornando dos mortos...</div>
+    </div>
+  </div>
+
+  <p style="font-family:var(--cem-font-body);color:var(--cem-text-secondary);font-size:0.9em;margin:0 0 14px;line-height:1.5">
+    O personagem continuará no memorial, identificado como <strong style="color:var(--cem-green)">Retornou dos Mortos</strong>. 
+    O registro histórico é preservado.
+  </p>
+
+  <form autocomplete="off">
+
+    <div class="cem-form-group">
+      <label class="cem-form-label" for="restoredDate">{{i18n.restoredDate}}</label>
+      <input class="cem-form-input" type="date" id="restoredDate" name="restoredDate" value="{{today}}">
+    </div>
+
+    <div class="cem-form-group">
+      <label class="cem-form-label" for="restoredNotes">{{i18n.restoredNotes}}</label>
+      <textarea class="cem-form-textarea" id="restoredNotes" name="restoredNotes"
+                placeholder="Como aconteceu a ressurreição? Ritual, magia divina, pacto..."
+                rows="3"></textarea>
+    </div>
+
+  </form>
+
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+    <button class="cem-btn cem-btn-ghost" data-action="cancel">
+      <i class="fas fa-times"></i> {{i18n.cancel}}
+    </button>
+    <button class="cem-btn cem-btn-restore" data-action="confirm" style="
+      background:var(--cem-green-dim);border-color:var(--cem-green-dim);color:#0a200f;font-weight:600">
+      <i class="fas fa-heartbeat"></i> {{i18n.confirm}}
+    </button>
+  </div>
+
+</div>

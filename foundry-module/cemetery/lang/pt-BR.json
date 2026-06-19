@@ -1,0 +1,107 @@
+{
+  "CEMETERY": {
+    "ModuleName": "Cemetery",
+    "DefaultName": "Memorial dos Caídos",
+    "Button": {
+      "Title": "Abrir Memorial"
+    },
+    "Context": {
+      "SendToMemorial": "Enviar ao Memorial"
+    },
+    "Dialog": {
+      "TitleRegister": "Registrar no Memorial",
+      "TitleRestore": "Ressuscitar Personagem",
+      "TitleEdit": "Editar Memorial",
+      "CauseOfDeath": "Causa da Morte",
+      "LastWords": "Últimas Palavras",
+      "PlaceOfDeath": "Local da Morte",
+      "KilledBy": "Responsável pela Morte",
+      "MemorialText": "Texto Memorial",
+      "ResurrectionDate": "Data da Ressurreição",
+      "ResurrectionNotes": "Observações",
+      "Confirm": "Confirmar",
+      "Cancel": "Cancelar",
+      "Save": "Salvar",
+      "Restore": "Restaurar"
+    },
+    "Gallery": {
+      "Title": "Memorial dos Caídos",
+      "SearchPlaceholder": "Buscar por nome...",
+      "FilterAll": "Todos",
+      "FilterPC": "Personagens",
+      "FilterNPC": "NPCs",
+      "FilterDead": "Apenas Mortos",
+      "FilterRestored": "Ressuscitados",
+      "SortByDate": "Ordenar por Data",
+      "SortByName": "Ordenar por Nome",
+      "NoResults": "Nenhum registro encontrado.",
+      "Export": "Exportar JSON",
+      "Settings": "Configurações"
+    },
+    "Stats": {
+      "TotalFallen": "Total de Mortos",
+      "TotalPC": "Personagens",
+      "TotalNPC": "NPCs",
+      "TotalRestored": "Ressuscitados"
+    },
+    "Card": {
+      "Level": "Nível",
+      "Class": "Classe",
+      "Race": "Raça",
+      "PlaceOfDeath": "Local da Morte",
+      "ViewDetails": "Ver Detalhes",
+      "Edit": "Editar",
+      "Restore": "Ressuscitar",
+      "Remove": "Remover do Memorial",
+      "Restored": "Retornou dos Mortos",
+      "Dead": "Morto",
+      "PC": "PC",
+      "NPC": "NPC"
+    },
+    "Detail": {
+      "TimeSinceDeath": "Tempo desde a morte",
+      "DeathDate": "Data da Morte",
+      "ResurrectionDate": "Data da Ressurreição",
+      "CauseOfDeath": "Causa da Morte",
+      "LastWords": "Últimas Palavras",
+      "PlaceOfDeath": "Local da Morte",
+      "KilledBy": "Responsável",
+      "MemorialText": "Memorial",
+      "ResurrectionNotes": "Notas de Ressurreição",
+      "Back": "Voltar",
+      "Edit": "Editar",
+      "Restore": "Ressuscitar",
+      "Remove": "Remover",
+      "Years": "anos",
+      "Months": "meses",
+      "Days": "dias",
+      "Hours": "horas",
+      "Today": "Hoje"
+    },
+    "Settings": {
+      "MemorialName": "Nome do Memorial",
+      "MemorialNameHint": "Nome exibido no topo da interface do memorial",
+      "AllowPlayers": "Permitir que jogadores vejam o memorial",
+      "AllowPlayersHint": "Se ativado, jogadores poderão abrir o memorial mas não editar",
+      "ShowInSidebar": "Mostrar botão na barra lateral",
+      "NimrodSync": "Nimrod Sync: sincronizar mortes automaticamente",
+      "NimrodSyncHint": "Quando ativo, envia isDead=true/false ao Nimrod Sync a cada morte ou ressurreição registrada",
+      "NimrodSyncUrl": "Nimrod Sync: URL base",
+      "NimrodSyncUrlHint": "Ex.: https://meu-nimrod.com/api  — deixe vazio se não usar Nimrod",
+      "NimrodSyncToken": "Nimrod Sync: Bearer Token",
+      "NimrodSyncTokenHint": "Token de autenticação para a API do Nimrod Sync (opcional)"
+    },
+    "Notification": {
+      "Registered": "{name} foi adicionado ao memorial.",
+      "Removed": "{name} foi removido do memorial.",
+      "Restored": "{name} retornou dos mortos!",
+      "Exported": "Memorial exportado com sucesso.",
+      "Error": "Erro ao processar solicitação.",
+      "AlreadyInMemorial": "{name} já está no memorial."
+    },
+    "Confirm": {
+      "Remove": "Tem certeza que deseja remover {name} do memorial? Esta ação não pode ser desfeita.",
+      "RemoveTitle": "Remover do Memorial"
+    }
+  }
+}

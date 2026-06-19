@@ -1,0 +1,69 @@
+{{!-- register-dialog.hbs - Register Death Dialog Template --}}
+
+<div class="cem-dialog">
+
+  {{!-- Actor header --}}
+  <div class="cem-dialog-actor-header">
+    <div class="cem-dialog-actor-portrait">
+      <img src="{{actor.img}}" alt="{{actor.name}}">
+    </div>
+    <div>
+      <div class="cem-dialog-actor-name">{{actor.name}}</div>
+      <div class="cem-dialog-actor-sub">
+        {{#if (cem_eq actor.type "character")}}{{i18n.pc}}{{else}}{{i18n.npc}}{{/if}}
+        · Enviando ao memorial...
+      </div>
+    </div>
+  </div>
+
+  <form autocomplete="off">
+
+    <div class="cem-section-divider">⚔ Circunstâncias da Morte</div>
+
+    <div class="cem-form-group">
+      <label class="cem-form-label" for="causeOfDeath">{{i18n.causeOfDeath}}</label>
+      <input class="cem-form-input" type="text" id="causeOfDeath" name="causeOfDeath"
+             placeholder="Ex.: Flechas envenenadas de um assassino...">
+    </div>
+
+    <div class="cem-form-group">
+      <label class="cem-form-label" for="killedBy">{{i18n.killedBy}}</label>
+      <input class="cem-form-input" type="text" id="killedBy" name="killedBy"
+             placeholder="Ex.: Lord Sombrio, Guardiões da Masmorra...">
+    </div>
+
+    <div class="cem-form-group">
+      <label class="cem-form-label" for="placeOfDeath">{{i18n.placeOfDeath}}</label>
+      <input class="cem-form-input" type="text" id="placeOfDeath" name="placeOfDeath"
+             placeholder="Ex.: Catacumbas de Valdris...">
+    </div>
+
+    <div class="cem-section-divider">📜 Legado</div>
+
+    <div class="cem-form-group">
+      <label class="cem-form-label" for="lastWords">{{i18n.lastWords}}</label>
+      <textarea class="cem-form-textarea" id="lastWords" name="lastWords"
+                placeholder="As últimas palavras pronunciadas..."
+                rows="2"></textarea>
+    </div>
+
+    <div class="cem-form-group">
+      <label class="cem-form-label" for="memorialText">{{i18n.memorialText}}</label>
+      <textarea class="cem-form-textarea" id="memorialText" name="memorialText"
+                placeholder="Homenagem, história, feitos notáveis..."
+                rows="3"></textarea>
+      <div class="cem-form-hint">Todos os campos são opcionais. Você pode editar depois.</div>
+    </div>
+
+  </form>
+
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+    <button class="cem-btn cem-btn-ghost" data-action="cancel">
+      <i class="fas fa-times"></i> {{i18n.cancel}}
+    </button>
+    <button class="cem-btn cem-btn-primary" data-action="confirm">
+      <i class="fas fa-landmark"></i> {{i18n.confirm}}
+    </button>
+  </div>
+
+</div>
