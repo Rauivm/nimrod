@@ -3,24 +3,24 @@
  * Handles all data operations for the Cemetery module.
  * Data is persisted as World-level flags.
  */
- 
+
 const MODULE_ID = "cemetery";
 const FLAG_KEY  = "memorial-dos-caidos";
- 
+
 export class MemorialData {
- 
+
   /* ── Internal helpers ─────────────────────────────── */
- 
+
   static _getWorldFlags() {
     return game.settings.get(MODULE_ID, "memorialData") ?? {};
   }
- 
+
   static async _setWorldFlags(data) {
     await game.settings.set(MODULE_ID, "memorialData", data);
   }
- 
+
   /* ── CRUD ─────────────────────────────────────────── */
- 
+
   /**
    * Register a character death in the memorial.
    * @param {Actor}  actor   - The Foundry Actor being registered
@@ -29,14 +29,14 @@ export class MemorialData {
    */
   static async registerDeath(actor, extra = {}) {
     const all = this._getWorldFlags();
- 
+
     // Check duplicate
     if (all[actor.id] && !all[actor.id].restored) {
       throw new Error(game.i18n.format("CEMETERY.Notification.AlreadyInMemorial", { name: actor.name }));
     }
- 
+
     const now = new Date();
- 
+
     // Try to extract common system fields — works for dnd5e, pf2e, etc.
     const sysData = actor.system ?? {};
     const level   = sysData.details?.level?.value
@@ -50,7 +50,7 @@ export class MemorialData {
     const race    = sysData.details?.race?.name
                  ?? sysData.details?.race
                  ?? null;
- 
+
     const entry = {
       id:             actor.id,
       name:           actor.name,
@@ -77,12 +77,12 @@ export class MemorialData {
       // reveal them, since many NPC deaths are spoilers or backstage info.
       visibleToPlayers: extra.visibleToPlayers ?? (actor.type === "character"),
     };
- 
+
     all[actor.id] = entry;
     await this._setWorldFlags(all);
     return actor.id;
   }
- 
+
   /**
    * Update custom fields of an existing memorial entry.
    */
@@ -92,38 +92,61 @@ export class MemorialData {
     all[actorId] = foundry.utils.mergeObject(all[actorId], data, { inplace: false });
     await this._setWorldFlags(all);
   }
- 
+
+  /**
+   * GM-only: toggle whether a memorial entry is visible to players in the
+   * public gallery. Has no effect on the GM's own Registry/Gallery view —
+   * GMs always see everything regardless of this flag.
+   */
+  static async toggleVisibility(actorId) {
+    const all = this._getWorldFlags();
+    if (!all[actorId]) throw new Error(`Memorial entry not found: ${actorId}`);
+    all[actorId].visibleToPlayers = !all[actorId].visibleToPlayers;
+    await this._setWorldFlags(all);
+    return all[actorId].visibleToPlayers;
+  }
+
+  /**
+   * GM-only: explicitly set visibility (used by bulk actions / API).
+   */
+  static async setVisibility(actorId, visible) {
+    const all = this._getWorldFlags();
+    if (!all[actorId]) throw new Error(`Memorial entry not found: ${actorId}`);
+    all[actorId].visibleToPlayers = !!visible;
+    await this._setWorldFlags(all);
+  }
+
   /**
    * Mark a character as restored (resurrected).
    */
   static async restoreActor(actorId, { restoredDate, restoredNotes } = {}) {
- 
+
     const all = this._getWorldFlags();
- 
+
     if (!all[actorId]) {
       throw new Error(`Memorial entry not found: ${actorId}`);
     }
- 
+
     all[actorId].restored = true;
     all[actorId].restoredDate =
       restoredDate ?? new Date().toISOString();
     all[actorId].restoredNotes =
       restoredNotes ?? "";
- 
+
     await this._setWorldFlags(all);
- 
+
     // ── Nimrod Sync ─────────────────────────────
- 
+
     const actor = game.actors.get(actorId);
- 
+
     if (actor) {
- 
+
       await actor.setFlag(
         "nimrod-sync",
         "isDead",
         false
       );
- 
+
       await actor.setFlag(
         "cemetery",
         "dead",
@@ -131,55 +154,75 @@ export class MemorialData {
       );
     }
   }
- 
+
   /**
    * Permanently remove an entry from the memorial.
    */
   static async removeEntry(actorId) {
- 
+
     const actor = game.actors.get(actorId);
- 
+
     if (actor) {
- 
+
       await actor.setFlag(
         "nimrod-sync",
         "isDead",
         false
       );
- 
+
       await actor.setFlag(
         "cemetery",
         "dead",
         false
       );
     }
- 
+
     const all = this._getWorldFlags();
- 
+
     delete all[actorId];
- 
+
     await this._setWorldFlags(all);
   }
- 
+
   /* ── Read ─────────────────────────────────────────── */
- 
+
   static getAllFallen() {
     const all = this._getWorldFlags();
     return Object.values(all);
   }
- 
-  static getMemorial(actorId) {
-    return this._getWorldFlags()[actorId] ?? null;
+
+  /**
+   * Permission-aware accessor for the public gallery.
+   * - GM: sees everything (PCs + NPCs, visible or not).
+   * - Player: sees PCs always (player characters belong to the party's
+   *   shared story) plus only NPCs the GM has explicitly flagged
+   *   `visibleToPlayers`. Hidden NPCs never reach a player's client.
+   */
+  static getVisibleFallen(isGM) {
+    const all = this.getAllFallen();
+    if (isGM) return all;
+    return all.filter(e => e.type === "character" || e.visibleToPlayers === true);
   }
- 
+
+  static getMemorial(actorId, isGM = true) {
+    const entry = this._getWorldFlags()[actorId] ?? null;
+    if (!entry) return null;
+    if (isGM) return entry;
+    // Defense in depth: even if a player somehow requests a hidden NPC's
+    // detail view directly, refuse to return it unless it's a PC or
+    // explicitly marked visible.
+    if (entry.type === "character" || entry.visibleToPlayers === true) return entry;
+    return null;
+  }
+
   static isInMemorial(actorId) {
     return actorId in this._getWorldFlags();
   }
- 
+
   /* ── Stats ────────────────────────────────────────── */
- 
-  static getStats() {
-    const all = this.getAllFallen();
+
+  static getStats(isGM = true) {
+    const all = this.getVisibleFallen(isGM);
     return {
       total:     all.length,
       pc:        all.filter(e => e.type === "character").length,
@@ -187,9 +230,9 @@ export class MemorialData {
       restored:  all.filter(e => e.restored).length,
     };
   }
- 
+
   /* ── Export ───────────────────────────────────────── */
- 
+
   static exportJSON() {
     const payload = {
       module:    MODULE_ID,
@@ -205,36 +248,36 @@ export class MemorialData {
     a.click();
     URL.revokeObjectURL(url);
   }
- 
+
   /* ── Filter & sort helpers ────────────────────────── */
- 
-  static filter({ search = "", typeFilter = "all", statusFilter = "all" } = {}) {
-    let list = this.getAllFallen();
- 
+
+  static filter({ search = "", typeFilter = "all", statusFilter = "all", isGM = true } = {}) {
+    let list = this.getVisibleFallen(isGM);
+
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(e => e.name.toLowerCase().includes(q));
     }
- 
+
     if (typeFilter === "pc")  list = list.filter(e => e.type === "character");
     if (typeFilter === "npc") list = list.filter(e => e.type === "npc");
- 
+
     if (statusFilter === "dead")      list = list.filter(e => !e.restored);
     if (statusFilter === "restored")  list = list.filter(e => e.restored);
- 
+
     return list;
   }
- 
+
   static sortByDate(list) {
     return [...list].sort((a, b) => new Date(b.deathDate) - new Date(a.deathDate));
   }
- 
+
   static sortByName(list) {
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
   }
- 
+
   /* ── Time helper ──────────────────────────────────── */
- 
+
   static timeSinceDeath(isoDate) {
     if (!isoDate) return "";
     const diff  = Date.now() - new Date(isoDate).getTime();
@@ -242,17 +285,17 @@ export class MemorialData {
     const years = Math.floor(days / 365);
     const months = Math.floor((days % 365) / 30);
     const rem   = days % 365 % 30;
- 
+
     const y = game.i18n.localize("CEMETERY.Detail.Years");
     const m = game.i18n.localize("CEMETERY.Detail.Months");
     const d = game.i18n.localize("CEMETERY.Detail.Days");
- 
+
     if (years > 0) return `${years} ${y}, ${months} ${m}`;
     if (months > 0) return `${months} ${m}, ${rem} ${d}`;
     if (days > 0)   return `${days} ${d}`;
     return game.i18n.localize("CEMETERY.Detail.Today");
   }
- 
+
   static formatDate(isoDate) {
     if (!isoDate) return "—";
     return new Date(isoDate).toLocaleDateString(game.i18n.lang, {

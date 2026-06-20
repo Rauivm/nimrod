@@ -54,6 +54,19 @@
                 rows="4">{{entry.memorialText}}</textarea>
     </div>
 
+    {{#if isNPC}}
+    <div class="cem-section-divider">👁 Visibilidade</div>
+
+    <div class="cem-form-group cem-form-checkbox-group">
+      <label class="cem-form-checkbox-label">
+        <input type="checkbox" id="visibleToPlayers" name="visibleToPlayers"
+               {{#if entry.visibleToPlayers}}checked{{/if}}>
+        {{i18n.visibleToPlayers}}
+      </label>
+      <p class="cem-form-hint">{{i18n.visibleToPlayersHint}}</p>
+    </div>
+    {{/if}}
+
   </form>
 
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">

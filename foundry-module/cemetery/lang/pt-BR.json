@@ -22,7 +22,9 @@
       "Confirm": "Confirmar",
       "Cancel": "Cancelar",
       "Save": "Salvar",
-      "Restore": "Restaurar"
+      "Restore": "Restaurar",
+      "VisibleToPlayers": "Visível para jogadores no memorial",
+      "VisibleToPlayersHint": "Quando marcado, este NPC aparecerá na galeria pública do memorial para todos os jogadores. PCs são sempre visíveis."
     },
     "Gallery": {
       "Title": "Memorial dos Caídos",
@@ -56,7 +58,10 @@
       "Restored": "Retornou dos Mortos",
       "Dead": "Morto",
       "PC": "PC",
-      "NPC": "NPC"
+      "NPC": "NPC",
+      "VisibleToPlayers": "Visível aos Jogadores",
+      "HiddenFromPlayers": "Oculto dos Jogadores",
+      "ToggleVisibility": "Alternar Visibilidade"
     },
     "Detail": {
       "TimeSinceDeath": "Tempo desde a morte",
@@ -97,11 +102,16 @@
       "Restored": "{name} retornou dos mortos!",
       "Exported": "Memorial exportado com sucesso.",
       "Error": "Erro ao processar solicitação.",
-      "AlreadyInMemorial": "{name} já está no memorial."
+      "AlreadyInMemorial": "{name} já está no memorial.",
+      "NowVisible": "{name} agora está visível aos jogadores.",
+      "NowHidden": "{name} agora está oculto dos jogadores."
     },
     "Confirm": {
       "Remove": "Tem certeza que deseja remover {name} do memorial? Esta ação não pode ser desfeita.",
       "RemoveTitle": "Remover do Memorial"
+    },
+    "Registry": {
+      "AliveOnlyGM": "Como jogador, você vê apenas os personagens do seu grupo aqui. NPCs são gerenciados pelo Mestre."
     }
   }
 }

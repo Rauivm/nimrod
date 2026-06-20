@@ -424,6 +424,110 @@
   pointer-events: none;
 }
 
+/* ── GM visibility badge — small eye icon overlaid on hidden NPC portraits ── */
+.cem-visibility-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 0.7em;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+.cem-visibility-badge.visible {
+  background: rgba(74,154,106,0.85);
+  color: #0a1a10;
+  border: 1px solid var(--cem-green);
+}
+
+.cem-visibility-badge.hidden {
+  background: rgba(140,40,40,0.85);
+  color: #f0d8d8;
+  border: 1px solid #a83838;
+}
+
+/* GM-only: dashed amber outline on cards hidden from players, so the GM
+   can spot at a glance which NPC memorials are still backstage. */
+.cem-card.is-hidden-entry {
+  outline: 1px dashed rgba(201,168,76,0.45);
+  outline-offset: -1px;
+}
+
+/* Visibility toggle button states inside the card action bar / detail header */
+.cem-card-action.visibility-off,
+.cem-btn.visibility-off {
+  color: #c08080;
+}
+.cem-card-action.visibility-off:hover,
+.cem-btn.visibility-off:hover {
+  color: #e0a0a0;
+  border-color: #a83838;
+}
+
+.cem-card-action.visibility-on,
+.cem-btn.visibility-on {
+  color: var(--cem-green);
+}
+.cem-card-action.visibility-on:hover,
+.cem-btn.visibility-on:hover {
+  color: var(--cem-green);
+  border-color: var(--cem-green);
+}
+
+/* ── Player-facing hint banner in the Registry tab ───────────────────── */
+.cem-reg-player-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  background: rgba(201,168,76,0.08);
+  border: 1px solid rgba(201,168,76,0.25);
+  border-radius: 6px;
+  color: var(--cem-gold-light);
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+
+.cem-reg-player-hint i {
+  color: var(--cem-gold);
+  flex-shrink: 0;
+}
+
+/* ── Edit dialog: visibility checkbox group ──────────────────────────── */
+.cem-form-checkbox-group {
+  gap: 4px;
+}
+
+.cem-form-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cem-stone-light);
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.cem-form-checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--cem-gold);
+  cursor: pointer;
+}
+
+.cem-form-hint {
+  margin: 2px 0 0 24px;
+  font-size: 0.78em;
+  color: var(--cem-text-secondary, #8a8276);
+  line-height: 1.4;
+}
+
 /* Card body */
 .cem-card-body {
   padding: 10px 12px 12px;

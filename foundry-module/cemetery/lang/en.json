@@ -22,7 +22,9 @@
       "Confirm": "Confirm",
       "Cancel": "Cancel",
       "Save": "Save",
-      "Restore": "Restore"
+      "Restore": "Restore",
+      "VisibleToPlayers": "Visible to players in the memorial",
+      "VisibleToPlayersHint": "When checked, this NPC will appear in the public memorial gallery for all players. PCs are always visible."
     },
     "Gallery": {
       "Title": "Hall of the Fallen",
@@ -56,7 +58,10 @@
       "Restored": "Returned from Death",
       "Dead": "Dead",
       "PC": "PC",
-      "NPC": "NPC"
+      "NPC": "NPC",
+      "VisibleToPlayers": "Visible to Players",
+      "HiddenFromPlayers": "Hidden from Players",
+      "ToggleVisibility": "Toggle Visibility"
     },
     "Detail": {
       "TimeSinceDeath": "Time since death",
@@ -97,11 +102,16 @@
       "Restored": "{name} returned from the dead!",
       "Exported": "Memorial exported successfully.",
       "Error": "Error processing request.",
-      "AlreadyInMemorial": "{name} is already in the memorial."
+      "AlreadyInMemorial": "{name} is already in the memorial.",
+      "NowVisible": "{name} is now visible to players.",
+      "NowHidden": "{name} is now hidden from players."
     },
     "Confirm": {
       "Remove": "Are you sure you want to remove {name} from the memorial? This cannot be undone.",
       "RemoveTitle": "Remove from Memorial"
+    },
+    "Registry": {
+      "AliveOnlyGM": "As a player, you only see your own party's characters here. NPCs are managed by the GM."
     }
   }
 }

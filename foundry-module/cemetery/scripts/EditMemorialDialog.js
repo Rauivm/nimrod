@@ -48,12 +48,15 @@ export class EditMemorialDialog extends HandlebarsApplicationMixin(ApplicationV2
   async _prepareContext() {
     return {
       entry: this._entry,
+      isNPC: this._entry.type !== "character",
       i18n: {
         causeOfDeath: game.i18n.localize("CEMETERY.Dialog.CauseOfDeath"),
         lastWords:    game.i18n.localize("CEMETERY.Dialog.LastWords"),
         placeOfDeath: game.i18n.localize("CEMETERY.Dialog.PlaceOfDeath"),
         killedBy:     game.i18n.localize("CEMETERY.Dialog.KilledBy"),
         memorialText: game.i18n.localize("CEMETERY.Dialog.MemorialText"),
+        visibleToPlayers: game.i18n.localize("CEMETERY.Dialog.VisibleToPlayers"),
+        visibleToPlayersHint: game.i18n.localize("CEMETERY.Dialog.VisibleToPlayersHint"),
         save:         game.i18n.localize("CEMETERY.Dialog.Save"),
         cancel:       game.i18n.localize("CEMETERY.Dialog.Cancel"),
       },
@@ -69,6 +72,10 @@ export class EditMemorialDialog extends HandlebarsApplicationMixin(ApplicationV2
       killedBy:     form.killedBy?.value?.trim()      ?? "",
       memorialText: form.memorialText?.value?.trim()  ?? "",
     };
+    // Only NPC entries expose the visibility checkbox — PCs stay always-visible.
+    if (form.visibleToPlayers) {
+      data.visibleToPlayers = form.visibleToPlayers.checked;
+    }
     this._resolve?.(data);
     this._resolve = null;
     this.close();

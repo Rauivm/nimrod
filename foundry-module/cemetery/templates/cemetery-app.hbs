@@ -49,6 +49,12 @@
 
 <div class="cem-registry">
 
+  {{#unless isGM}}
+  <p class="cem-reg-player-hint">
+    <i class="fas fa-info-circle"></i> {{i18n.registryAliveHint}}
+  </p>
+  {{/unless}}
+
   {{!-- Registry toolbar --}}
   <div class="cem-reg-toolbar">
     <div class="cem-search-wrap">
@@ -227,13 +233,19 @@
   <div class="cem-grid">
     {{#if cards.length}}
       {{#each cards}}
-      <div class="cem-card {{#if restored}}is-restored{{/if}}" data-actor-id="{{id}}">
+      <div class="cem-card {{#if restored}}is-restored{{/if}} {{#if (cem_and ../isGM (cem_not visibleToPlayers))}}is-hidden-entry{{/if}}" data-actor-id="{{id}}">
         <div class="cem-card-portrait">
           <img src="{{cem_defaultImg img}}" alt="{{name}}">
           <div class="cem-card-portrait-overlay"></div>
           <div class="cem-card-badge {{#if isPC}}pc{{else}}npc{{/if}}">{{typeLabel}}</div>
           {{#if restored}}
           <div class="cem-restored-ribbon">↑</div>
+          {{/if}}
+          {{#if (cem_and ../isGM (cem_not isPC))}}
+          <div class="cem-visibility-badge {{#if visibleToPlayers}}visible{{else}}hidden{{/if}}"
+               title="{{#if visibleToPlayers}}{{../i18n.visibleToPlayers}}{{else}}{{../i18n.hiddenFromPlayers}}{{/if}}">
+            <i class="fas {{#if visibleToPlayers}}fa-eye{{else}}fa-eye-slash{{/if}}"></i>
+          </div>
           {{/if}}
         </div>
         <div class="cem-card-body">
@@ -266,6 +278,13 @@
           <button class="cem-card-action" data-action="editEntry" title="{{../i18n.edit}}">
             <i class="fas fa-pen"></i>
           </button>
+          {{#unless isPC}}
+          <button class="cem-card-action {{#if visibleToPlayers}}visibility-on{{else}}visibility-off{{/if}}"
+                  data-action="toggleVisibility"
+                  title="{{../i18n.toggleVisibility}}">
+            <i class="fas {{#if visibleToPlayers}}fa-eye{{else}}fa-eye-slash{{/if}}"></i>
+          </button>
+          {{/unless}}
           {{#unless restored}}
           <button class="cem-card-action restore" data-action="restoreEntry" title="{{../i18n.restore}}">
             <i class="fas fa-heartbeat"></i>
@@ -312,6 +331,13 @@
       <button class="cem-btn cem-btn-ghost" data-action="editEntry" data-actor-id="{{id}}">
         <i class="fas fa-pen"></i> {{../i18n.edit}}
       </button>
+      {{#unless isPC}}
+      <button class="cem-btn cem-btn-ghost {{#if visibleToPlayers}}visibility-on{{else}}visibility-off{{/if}}"
+              data-action="toggleVisibility" data-actor-id="{{id}}">
+        <i class="fas {{#if visibleToPlayers}}fa-eye{{else}}fa-eye-slash{{/if}}"></i>
+        {{#if visibleToPlayers}}{{../i18n.visibleToPlayers}}{{else}}{{../i18n.hiddenFromPlayers}}{{/if}}
+      </button>
+      {{/unless}}
       {{#unless restored}}
       <button class="cem-btn cem-btn-restore" data-action="restoreEntry" data-actor-id="{{id}}">
         <i class="fas fa-heartbeat"></i> {{../i18n.restore}}
@@ -350,6 +376,12 @@
           {{#if level}}
           <span class="cem-detail-chip type-npc">
             {{../i18n.level}} {{level}}
+          </span>
+          {{/if}}
+          {{#if (cem_and ../isGM (cem_not isPC))}}
+          <span class="cem-detail-chip {{#if visibleToPlayers}}status-restored{{else}}status-dead{{/if}}">
+            <i class="fas {{#if visibleToPlayers}}fa-eye{{else}}fa-eye-slash{{/if}}"></i>
+            {{#if visibleToPlayers}}{{../i18n.visibleToPlayers}}{{else}}{{../i18n.hiddenFromPlayers}}{{/if}}
           </span>
           {{/if}}
         </div>

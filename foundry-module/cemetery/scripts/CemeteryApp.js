@@ -62,6 +62,7 @@ export class CemeteryApp extends HandlebarsApplicationMixin(ApplicationV2) {
       showGallery: CemeteryApp.#onShowGallery,
       markDead: CemeteryApp.#onMarkDead,
       restoreActorRegistry: CemeteryApp.#onRestoreActorRegistry,
+      toggleVisibility: CemeteryApp.#onToggleVisibility,
     },
   };
 
@@ -77,13 +78,14 @@ export class CemeteryApp extends HandlebarsApplicationMixin(ApplicationV2) {
     const isGM      = game.user.isGM;
     const memName   = game.settings.get(MODULE_ID, "memorialName")
                    || game.i18n.localize("CEMETERY.DefaultName");
-    const stats     = MemorialData.getStats();
-    const registryActors = this._getRegistryActors();
+    const stats     = MemorialData.getStats(isGM);
+    const registryActors = this._getRegistryActors(isGM);
 
     let list = MemorialData.filter({
       search:       this._search,
       typeFilter:   this._typeFilter,
       statusFilter: this._statusFilter,
+      isGM,
     });
 
     list = this._sortMode === "name"
@@ -103,7 +105,7 @@ export class CemeteryApp extends HandlebarsApplicationMixin(ApplicationV2) {
     // Prepare detail if needed
     let detail = null;
     if (this._view === "detail" && this._detailId) {
-      const e = MemorialData.getMemorial(this._detailId);
+      const e = MemorialData.getMemorial(this._detailId, isGM);
       if (e) {
         detail = {
           ...e,
@@ -170,6 +172,10 @@ export class CemeteryApp extends HandlebarsApplicationMixin(ApplicationV2) {
         race:             game.i18n.localize("CEMETERY.Card.Race"),
         statusDead:       game.i18n.localize("CEMETERY.Card.Dead"),
         statusRestored:   game.i18n.localize("CEMETERY.Card.Restored"),
+        visibleToPlayers:    game.i18n.localize("CEMETERY.Card.VisibleToPlayers"),
+        hiddenFromPlayers:   game.i18n.localize("CEMETERY.Card.HiddenFromPlayers"),
+        toggleVisibility:    game.i18n.localize("CEMETERY.Card.ToggleVisibility"),
+        registryAliveHint:   game.i18n.localize("CEMETERY.Registry.AliveOnlyGM"),
       },
     };
   }
@@ -240,6 +246,7 @@ export class CemeteryApp extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   static async #onMarkDead(event, target) {
+    if (!game.user.isGM) return;
 
     const actorId =
       target.closest("[data-actor-id]")?.dataset.actorId;
@@ -283,13 +290,15 @@ export class CemeteryApp extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   static async #onRestoreActorRegistry(event, target) {
+    if (!game.user.isGM) return;
+
     const actorId =
       target.closest("[data-actor-id]")?.dataset.actorId;
 
     if (!actorId) return;
 
     const entry =
-      MemorialData.getMemorial(actorId);
+      MemorialData.getMemorial(actorId, true);
 
     if (!entry) return;
 
@@ -315,11 +324,12 @@ export class CemeteryApp extends HandlebarsApplicationMixin(ApplicationV2) {
 
   static async #onEditEntry(event, target) {
     event.stopPropagation();
+    if (!game.user.isGM) return;
     const id    = target.closest("[data-actor-id]")?.dataset.actorId
                ?? this._detailId;
     if (!id) return;
 
-    const entry = MemorialData.getMemorial(id);
+    const entry = MemorialData.getMemorial(id, true);
     if (!entry) return;
 
     const data = await EditMemorialDialog.prompt(entry);
@@ -332,11 +342,12 @@ export class CemeteryApp extends HandlebarsApplicationMixin(ApplicationV2) {
 
   static async #onRestoreEntry(event, target) {
     event.stopPropagation();
+    if (!game.user.isGM) return;
     const id    = target.closest("[data-actor-id]")?.dataset.actorId
                ?? this._detailId;
     if (!id) return;
 
-    const entry = MemorialData.getMemorial(id);
+    const entry = MemorialData.getMemorial(id, true);
     if (!entry) return;
 
     const data = await RestoreActorDialog.prompt(entry);
@@ -349,11 +360,12 @@ export class CemeteryApp extends HandlebarsApplicationMixin(ApplicationV2) {
 
   static async #onRemoveEntry(event, target) {
     event.stopPropagation();
+    if (!game.user.isGM) return;
     const id    = target.closest("[data-actor-id]")?.dataset.actorId
                ?? this._detailId;
     if (!id) return;
 
-    const entry = MemorialData.getMemorial(id);
+    const entry = MemorialData.getMemorial(id, true);
     if (!entry) return;
 
     const confirmed = await Dialog.confirm({
@@ -380,11 +392,55 @@ export class CemeteryApp extends HandlebarsApplicationMixin(ApplicationV2) {
     );
   }
 
+  /**
+   * GM-only: toggle whether a dead NPC's memorial entry is visible to
+   * players in the public gallery. PCs cannot be hidden — the toggle
+   * button is not rendered for character-type entries (see template).
+   */
+  static async #onToggleVisibility(event, target) {
+    event.stopPropagation();
+    if (!game.user.isGM) return;
+
+    const id = target.closest("[data-actor-id]")?.dataset.actorId
+            ?? this._detailId;
+    if (!id) return;
+
+    const entry = MemorialData.getMemorial(id, true);
+    if (!entry) return;
+    if (entry.type === "character") return; // PCs are always visible
+
+    const nowVisible = await MemorialData.toggleVisibility(id);
+
+    ui.notifications.info(
+      nowVisible
+        ? game.i18n.format("CEMETERY.Notification.NowVisible", { name: entry.name })
+        : game.i18n.format("CEMETERY.Notification.NowHidden",  { name: entry.name })
+    );
+
+    this.render();
+  }
+
   /* ── Registry ─────────────────────────────────────── */
 
-  _getRegistryActors() {
-    return game.actors.contents.map(actor => {
-      const memorial = MemorialData.getMemorial(actor.id);
+  /**
+   * Build the Registry tab's actor list.
+   *
+   * GM: sees every actor in the world (PCs + NPCs) so they can mark
+   *     deaths/resurrections freely.
+   *
+   * Player: the Registry's only purpose is "mark an actor as dead/alive",
+   *     which is exclusively a GM bookkeeping action. Players never need
+   *     — and must never see — the full NPC roster (including NPCs that
+   *     are alive and not yet revealed to them). Players only see their
+   *     own party's player-characters here.
+   */
+  _getRegistryActors(isGM = game.user.isGM) {
+    const source = isGM
+      ? game.actors.contents
+      : game.actors.contents.filter(a => a.type === "character" && a.isOwner);
+
+    return source.map(actor => {
+      const memorial = MemorialData.getMemorial(actor.id, isGM);
 
       return {
         id: actor.id,
