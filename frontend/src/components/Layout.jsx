@@ -83,6 +83,10 @@ export default function Layout() {
             <NavLink to="/profile" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
               <UserCircle size={14} /><span>Perfil</span>
             </NavLink>
+            <NavLink
+              to="/patch-notes" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
+              Atualizações
+            </NavLink>
           </nav>
 
           <div className="header-right">

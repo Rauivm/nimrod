@@ -17,12 +17,30 @@ function serializePost(row) {
     replyCount: Number(row.reply_count ?? 0),
     createdAt:  row.created_at,
     author: {
-      id:          row.author_id,
-      displayName: row.author_display_name || row.author_name || 'Aventureiro',
-      role:        row.author_role,
+      id:            row.author_id,
+      displayName:   row.author_display_name || row.author_name || 'Aventureiro',
+      role:          row.author_role,
+      // ── Character fields (null when post was made without a character) ──
+      characterId:        row.character_id        ?? null,
+      characterName:      row.character_name      ?? null,
+      characterLevel:     row.character_level != null ? Number(row.character_level) : null,
+      characterTokenImg:  row.character_token_img ?? null,
     },
   };
 }
+
+// ── Common SELECT fragment reused in every query ──────────────────────────────
+// LEFT JOINs player_characters so posts without a character_id still appear.
+const POST_SELECT = `
+  SELECT
+    p.*,
+    COALESCE(u.display_name, u.name) AS author_display_name,
+    u.name                           AS author_name,
+    u.role                           AS author_role,
+    pc.name                          AS character_name,
+    pc.level                         AS character_level,
+    pc.token_img                     AS character_token_img
+`;
 
 export async function postRoutes(fastify) {
 
@@ -41,10 +59,7 @@ export async function postRoutes(fastify) {
 
     params.push(limit);
     const res = await query(
-      `SELECT p.*,
-              COALESCE(u.display_name, u.name) AS author_display_name,
-              u.name                           AS author_name,
-              u.role                           AS author_role,
+      `${POST_SELECT},
               EXISTS(
                 SELECT 1 FROM post_likes pl
                 WHERE pl.post_id = p.id AND pl.user_id = $1
@@ -52,6 +67,7 @@ export async function postRoutes(fastify) {
               (SELECT COUNT(*) FROM posts r WHERE r.parent_id = p.id) AS reply_count
        FROM posts p
        JOIN users u ON u.id = p.author_id
+       LEFT JOIN player_characters pc ON pc.id = p.character_id
        ${where}
        ORDER BY p.created_at DESC
        LIMIT $${params.length}`,
@@ -63,10 +79,7 @@ export async function postRoutes(fastify) {
   // ── GET /posts/:id/replies ─────────────────────────────────────────────────
   fastify.get('/posts/:id/replies', async (req) => {
     const res = await query(
-      `SELECT p.*,
-              COALESCE(u.display_name, u.name) AS author_display_name,
-              u.name                           AS author_name,
-              u.role                           AS author_role,
+      `${POST_SELECT},
               EXISTS(
                 SELECT 1 FROM post_likes pl
                 WHERE pl.post_id = p.id AND pl.user_id = $2
@@ -74,6 +87,7 @@ export async function postRoutes(fastify) {
               (SELECT COUNT(*) FROM posts r WHERE r.parent_id = p.id) AS reply_count
        FROM posts p
        JOIN users u ON u.id = p.author_id
+       LEFT JOIN player_characters pc ON pc.id = p.character_id
        WHERE p.parent_id = $1
        ORDER BY p.created_at ASC`,
       [req.params.id, req.user.id],
@@ -88,18 +102,35 @@ export async function postRoutes(fastify) {
         type: 'object',
         required: ['content'],
         properties: {
-          content:    { type: 'string', minLength: 1, maxLength: 500 },
-          parentId:   { type: 'string' },
-          entityType: { type: 'string', enum: ['mission', 'poll'] },
-          entityId:   { type: 'string' },
+          content:     { type: 'string', minLength: 1, maxLength: 500 },
+          parentId:    { type: 'string' },
+          entityType:  { type: 'string', enum: ['mission', 'poll'] },
+          entityId:    { type: 'string' },
+          characterId: { type: 'string' },   // ← novo campo opcional
         },
       },
     },
   }, async (req, reply) => {
     if (!assertRateLimit(req, reply, 'posts:create', { limit: 8, windowMs: 60_000 })) return reply;
-    const { content, parentId, entityType, entityId } = req.body;
+    const { content, parentId, entityType, entityId, characterId } = req.body;
 
-    // Depth guard — prevent infinite nesting
+    // ── Validação do personagem ────────────────────────────────────────────
+    // Se characterId foi fornecido, garante que ele pertence ao usuário
+    // autenticado e está ativo (não aposentado).
+    if (characterId) {
+      const charRes = await query(
+        `SELECT id FROM player_characters
+         WHERE id = $1 AND user_id = $2 AND retired = false`,
+        [characterId, req.user.id],
+      );
+      if (!charRes.rows.length) {
+        return reply.code(403).send({
+          error: 'Personagem não encontrado ou não pertence ao seu usuário',
+        });
+      }
+    }
+
+    // ── Depth guard — prevent infinite nesting ────────────────────────────
     if (parentId) {
       const depthRes = await query(
         `WITH RECURSIVE tree AS (
@@ -118,20 +149,26 @@ export async function postRoutes(fastify) {
     }
 
     const res = await query(
-      `INSERT INTO posts (author_id, content, parent_id, entity_type, entity_id)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO posts (author_id, content, parent_id, entity_type, entity_id, character_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [req.user.id, content.trim(), parentId || null, entityType || null, entityId || null],
+      [
+        req.user.id,
+        content.trim(),
+        parentId    || null,
+        entityType  || null,
+        entityId    || null,
+        characterId || null,   // ← persiste character_id
+      ],
     );
 
     const full = await query(
-      `SELECT p.*,
-              COALESCE(u.display_name, u.name) AS author_display_name,
-              u.name                           AS author_name,
-              u.role                           AS author_role,
-              false                            AS liked_by_me,
-              0                               AS reply_count
-       FROM posts p JOIN users u ON u.id = p.author_id
+      `${POST_SELECT},
+              false AS liked_by_me,
+              0     AS reply_count
+       FROM posts p
+       JOIN users u ON u.id = p.author_id
+       LEFT JOIN player_characters pc ON pc.id = p.character_id
        WHERE p.id = $1`,
       [res.rows[0].id],
     );
@@ -139,7 +176,7 @@ export async function postRoutes(fastify) {
     const post = serializePost(full.rows[0]);
     broadcast(parentId ? 'REPLY_CREATED' : 'POST_CREATED', post);
 
-    // Notify Discord for top-level tavern posts only (not replies, not entity-linked posts)
+    // Notify Discord for top-level tavern posts only
     if (!parentId && !entityType) {
       notifyPostCreated(post);
     }
@@ -148,7 +185,6 @@ export async function postRoutes(fastify) {
   });
 
   // ── POST /posts/:id/like ───────────────────────────────────────────────────
-  // Optimistic-safe: returns delta only, no full feed reload needed.
   fastify.post('/posts/:id/like', async (req, reply) => {
     if (!assertRateLimit(req, reply, 'posts:like', { limit: 60, windowMs: 60_000 })) return reply;
     const { id } = req.params;

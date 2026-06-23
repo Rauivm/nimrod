@@ -7,25 +7,88 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 
 const MAX_VISIBLE_DEPTH = 3;
 
+// ── PostAvatar ────────────────────────────────────────────────────────────────
+// Exibe token_img do personagem quando disponível.
+// Proxy idêntico ao TokenImg do CharacterCard para imagens do Foundry.
+// Fallback: círculo com inicial, mesma lógica de cor de antes.
+function PostAvatar({ author }) {
+  const [imgErrored, setImgErrored] = useState(false);
+
+  const isGM      = author?.role === 'GM';
+  const hasChar   = Boolean(author?.characterName);
+  const rawSrc    = author?.characterTokenImg ?? null;
+
+  // Mesma lógica de proxy do CharacterCard/TokenImg
+  const proxied = rawSrc
+    ? rawSrc.startsWith('/uploads/')
+      ? rawSrc
+      : `/api/foundry/assets?path=${encodeURIComponent(
+          rawSrc.startsWith('http') ? new URL(rawSrc).pathname : rawSrc
+        )}`
+    : null;
+
+  const showImg = proxied && !imgErrored;
+
+  const fallbackInitial = hasChar
+    ? author.characterName[0]?.toUpperCase() ?? '?'
+    : (author?.displayName || 'A')[0]?.toUpperCase() ?? '?';
+
+  const fallbackBg = isGM
+    ? 'linear-gradient(135deg, #8b2020, #c9a84c)'
+    : 'linear-gradient(135deg, #2a3060, #4a5090)';
+
+  return (
+    <div
+      className="post-avatar"
+      style={showImg ? {} : { background: fallbackBg }}
+    >
+      {showImg
+        ? <img
+            src={proxied}
+            alt={author.characterName}
+            onError={() => setImgErrored(true)}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        : fallbackInitial
+      }
+    </div>
+  );
+}
+
+// ── AuthorChip ────────────────────────────────────────────────────────────────
+// Exibe: [token] Personagem Lv 5 / por Jogador  (com personagem)
+//        [inicial] Nome do Jogador               (sem personagem — legado)
 function AuthorChip({ author }) {
-  const name    = author?.displayName || 'Aventureiro';
-  const isGM    = author?.role === 'GM';
-  const initial = name[0]?.toUpperCase() ?? '?';
+  const playerName = author?.displayName || 'Aventureiro';
+  const isGM       = author?.role === 'GM';
+  const hasChar    = Boolean(author?.characterName);
+
   return (
     <div className="post-author">
-      <div className="post-avatar" style={{
-        background: isGM
-          ? 'linear-gradient(135deg, #8b2020, #c9a84c)'
-          : 'linear-gradient(135deg, #2a3060, #4a5090)',
-      }}>
-        {initial}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <span className="post-author-name">{name}</span>
-        {isGM
-          ? <span className="gm-badge-sm">GM</span>
-          : <span className="role-badge-sm">Jogador</span>
-        }
+      <PostAvatar author={author} />
+
+      <div className="post-author-meta">
+        {hasChar ? (
+          <>
+            <div className="post-author-char-row">
+              <span className="post-char-name">{author.characterName}</span>
+              <span className="post-char-level">Lv {author.characterLevel}</span>
+              {isGM && <span className="gm-badge-sm">GM</span>}
+            </div>
+            <div className="post-author-player-row">
+              <span className="post-author-by">por </span>
+              <span className="post-author-name">{playerName}</span>
+            </div>
+          </>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span className="post-author-name">{playerName}</span>
+            {isGM
+              ? <span className="gm-badge-sm">GM</span>
+              : <span className="role-badge-sm">Jogador</span>
+            }
+          </div>
+        )}
       </div>
     </div>
   );
@@ -33,19 +96,17 @@ function AuthorChip({ author }) {
 
 export const PostCard = memo(function PostCard({ post: initialPost, onUpdate, depth = 0 }) {
   const { user } = useAuth();
-  const [localPost, setLocalPost] = useState(initialPost);
-  const [liking, setLiking]             = useState(false);
-  const [showReplyBox, setShowReplyBox] = useState(false);
-  const [repliesOpen, setRepliesOpen]   = useState(false);
-  const [replies, setReplies]           = useState([]);
-  const [repliesLoaded, setRepliesLoaded] = useState(false);
+  const [localPost, setLocalPost]           = useState(initialPost);
+  const [liking, setLiking]                 = useState(false);
+  const [showReplyBox, setShowReplyBox]     = useState(false);
+  const [repliesOpen, setRepliesOpen]       = useState(false);
+  const [replies, setReplies]               = useState([]);
+  const [repliesLoaded, setRepliesLoaded]   = useState(false);
   const [loadingReplies, setLoadingReplies] = useState(false);
 
   const post = localPost;
 
-  useEffect(() => {
-    setLocalPost(initialPost);
-  }, [initialPost]);
+  useEffect(() => { setLocalPost(initialPost); }, [initialPost]);
 
   const like = async () => {
     if (liking) return;
@@ -171,12 +232,26 @@ export const PostCard = memo(function PostCard({ post: initialPost, onUpdate, de
         .post-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; transition: border-color 0.15s; }
         .post-card:hover { border-color: var(--border-bright); }
         .post-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+
+        /* ── Author chip ── */
         .post-author { display: flex; align-items: center; gap: 9px; }
-        .post-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-size: 13px; font-weight: 700; color: #fff; flex-shrink: 0; }
+        .post-avatar { width: 32px; height: 32px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-size: 13px; font-weight: 700; color: #fff; flex-shrink: 0; }
+        .post-author-meta { display: flex; flex-direction: column; gap: 1px; }
+
+        /* Com personagem */
+        .post-author-char-row { display: flex; align-items: center; gap: 5px; }
+        .post-char-name { font-weight: 700; font-size: 14px; color: var(--text); font-family: var(--font-display); letter-spacing: 0.3px; }
+        .post-char-level { font-size: 10px; font-family: var(--font-mono); color: var(--gold); background: rgba(201,168,76,0.1); border: 1px solid var(--gold-dim); border-radius: 3px; padding: 0px 4px; }
+        .post-author-player-row { display: flex; align-items: center; }
+        .post-author-by { font-size: 11px; color: var(--text-faint); }
+        .post-author-name { font-size: 11px; color: var(--text-muted); }
+
+        /* Sem personagem (legado) */
         .post-author-name { font-weight: 600; font-size: 14px; color: var(--text); }
         .post-time { font-size: 11px; color: var(--text-faint); white-space: nowrap; }
         .gm-badge-sm { font-family: var(--font-display); font-size: 8px; font-weight: 700; color: var(--gold); letter-spacing: 1px; padding: 1px 4px; background: rgba(201,168,76,0.1); border: 1px solid var(--gold-dim); border-radius: 2px; }
         .role-badge-sm { font-family: var(--font-display); font-size: 8px; color: var(--text-faint); letter-spacing: 0.5px; text-transform: uppercase; }
+
         .post-content { font-size: 15px; line-height: 1.65; color: var(--text); white-space: pre-wrap; word-break: break-word; }
         .post-entity-badge { display: inline-block; font-size: 11px; color: var(--gold); letter-spacing: 0.5px; background: rgba(201,168,76,0.08); border: 1px solid var(--gold-dim); border-radius: var(--radius); padding: 2px 8px; margin: 8px 0 0; }
         .post-actions { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
@@ -195,34 +270,64 @@ export const PostCard = memo(function PostCard({ post: initialPost, onUpdate, de
   );
 });
 
+// ── ReplyComposer ─────────────────────────────────────────────────────────────
+// Respostas também podem ter personagem associado.
+// Carrega os personagens do usuário ao montar e permite selecionar.
 function ReplyComposer({ parentId, onSubmit, onCancel }) {
   const { user } = useAuth();
-  const [content, setContent] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [content, setContent]         = useState('');
+  const [loading, setLoading]         = useState(false);
+  const [characters, setCharacters]   = useState([]);
+  const [characterId, setCharacterId] = useState('');
+
+  // Carrega personagens ativos do usuário
+  useEffect(() => {
+    if (!user?.id) return;
+    api.get(`/players/${user.id}/characters`)
+      .then(chars => {
+        const active = chars.filter(c => !c.retired && c.active !== false);
+        setCharacters(active);
+        if (active.length === 1) setCharacterId(active[0].id);
+      })
+      .catch(() => {});
+  }, [user?.id]);
 
   const submit = async () => {
     if (!content.trim()) return;
     const nextContent = content.trim();
-    const tempId = `temp-reply-${Date.now()}`;
+    const tempId      = `temp-reply-${Date.now()}`;
+
+    // Resolve dados do personagem selecionado para o post otimista
+    const selectedChar = characters.find(c => c.id === characterId);
+
     const optimisticReply = {
-      id: tempId,
-      content: nextContent,
+      id:         tempId,
+      content:    nextContent,
       parentId,
-      likeCount: 0,
-      likedByMe: false,
+      likeCount:  0,
+      likedByMe:  false,
       replyCount: 0,
-      createdAt: new Date().toISOString(),
+      createdAt:  new Date().toISOString(),
       author: {
-        id: user?.id,
-        displayName: user?.displayName || user?.name || 'Aventureiro',
-        role: user?.role,
+        id:             user?.id,
+        displayName:    user?.displayName || user?.name || 'Aventureiro',
+        role:           user?.role,
+        characterId:        selectedChar?.id       ?? null,
+        characterName:      selectedChar?.name     ?? null,
+        characterLevel:     selectedChar?.level    ?? null,
+        characterTokenImg:  selectedChar?.tokenImg ?? null,
       },
     };
+
     setLoading(true);
     setContent('');
     onSubmit?.(optimisticReply);
     try {
-      const post = await api.post('/posts', { content: nextContent, parentId });
+      const post = await api.post('/posts', {
+        content:     nextContent,
+        parentId,
+        characterId: characterId || undefined,
+      });
       onSubmit?.(post, tempId);
     } catch (e) {
       onSubmit?.(null, tempId, true);
@@ -236,6 +341,28 @@ function ReplyComposer({ parentId, onSubmit, onCancel }) {
     <div className="reply-composer">
       <CornerDownRight size={13} style={{ color: 'var(--text-faint)', flexShrink: 0, marginTop: 8 }} />
       <div style={{ flex: 1 }}>
+        {/* Seletor de personagem — só aparece se o usuário tem personagens */}
+        {characters.length > 0 && (
+          <select
+            value={characterId}
+            onChange={e => setCharacterId(e.target.value)}
+            style={{
+              width: '100%', marginBottom: '6px',
+              fontSize: '12px', fontFamily: 'var(--font-display)',
+              background: 'var(--bg-elevated)', color: 'var(--text)',
+              border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+              padding: '4px 8px',
+            }}
+          >
+            <option value="">— Responder como jogador —</option>
+            {characters.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.name} (Lv {c.level})
+              </option>
+            ))}
+          </select>
+        )}
+
         <textarea
           autoFocus value={content}
           onChange={e => setContent(e.target.value)}
@@ -257,39 +384,70 @@ function ReplyComposer({ parentId, onSubmit, onCancel }) {
   );
 }
 
+// ── PostComposer ──────────────────────────────────────────────────────────────
+// Agora carrega os personagens do usuário e exibe um seletor acima do textarea.
 export function PostComposer({ onPost }) {
   const { user } = useAuth();
-  const [content, setContent] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [content, setContent]         = useState('');
+  const [loading, setLoading]         = useState(false);
+  const [characters, setCharacters]   = useState([]);
+  const [characterId, setCharacterId] = useState('');
+  const [charsLoading, setCharsLoading] = useState(true);
+
+  // Carrega personagens ativos do usuário autenticado
+  useEffect(() => {
+    if (!user?.id) return;
+    setCharsLoading(true);
+    api.get(`/players/${user.id}/characters`)
+      .then(chars => {
+        const active = chars.filter(c => !c.retired && c.active !== false);
+        setCharacters(active);
+        // Pré-seleciona automaticamente se só há um personagem
+        if (active.length === 1) setCharacterId(active[0].id);
+      })
+      .catch(() => {})
+      .finally(() => setCharsLoading(false));
+  }, [user?.id]);
 
   const submit = async () => {
     if (!content.trim()) return;
-    const nextContent = content.trim();
-    const tempId = `temp-${Date.now()}`;
+    const nextContent  = content.trim();
+    const tempId       = `temp-${Date.now()}`;
+
+    // Resolve dados do personagem selecionado para o post otimista
+    const selectedChar = characters.find(c => c.id === characterId);
+
     const optimisticPost = {
-      id: tempId,
-      content: nextContent,
-      parentId: null,
+      id:         tempId,
+      content:    nextContent,
+      parentId:   null,
       entityType: null,
-      entityId: null,
-      likeCount: 0,
-      likedByMe: false,
+      entityId:   null,
+      likeCount:  0,
+      likedByMe:  false,
       replyCount: 0,
-      createdAt: new Date().toISOString(),
+      createdAt:  new Date().toISOString(),
       author: {
-        id: user?.id,
-        displayName: user?.displayName || user?.name || 'Aventureiro',
-        role: user?.role,
+        id:             user?.id,
+        displayName:    user?.displayName || user?.name || 'Aventureiro',
+        role:           user?.role,
+        characterId:        selectedChar?.id       ?? null,
+        characterName:      selectedChar?.name     ?? null,
+        characterLevel:     selectedChar?.level    ?? null,
+        characterTokenImg:  selectedChar?.tokenImg ?? null,
       },
     };
+
     setLoading(true);
     setContent('');
     onPost?.(optimisticPost);
     try {
-      const post = await api.post('/posts', { content: nextContent });
+      const post = await api.post('/posts', {
+        content:     nextContent,
+        characterId: characterId || undefined,  // ← envia o personagem selecionado
+      });
       onPost?.(post, tempId);
-    }
-    catch (e) {
+    } catch (e) {
       onPost?.(null, tempId, true);
       setContent(nextContent);
       alert(e.message);
@@ -299,16 +457,59 @@ export function PostComposer({ onPost }) {
 
   return (
     <div className="composer">
-      <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="O que aconteceu na aventura?" maxLength={500} onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(); }} rows={3} />
+      {/* ── Seletor de personagem ── */}
+      {!charsLoading && characters.length > 0 && (
+        <div className="composer-char-row">
+          <span className="composer-char-label">Postar como:</span>
+          <select
+            value={characterId}
+            onChange={e => setCharacterId(e.target.value)}
+            className="composer-char-select"
+          >
+            <option value="">— Jogador (sem personagem) —</option>
+            {characters.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.name} · Lv {c.level}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <textarea
+        value={content}
+        onChange={e => setContent(e.target.value)}
+        placeholder={
+          characterId
+            ? `O que ${characters.find(c => c.id === characterId)?.name ?? 'seu personagem'} faz?`
+            : 'O que aconteceu na aventura?'
+        }
+        maxLength={500}
+        onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(); }}
+        rows={3}
+      />
+
       <div className="composer-footer">
-        <span style={{ fontSize: '12px', color: content.length > 450 ? 'var(--crimson-bright)' : 'var(--text-faint)' }}>{content.length}/500</span>
-        <button onClick={submit} disabled={loading || !content.trim()} className="post-btn">Postar</button>
+        <span style={{ fontSize: '12px', color: content.length > 450 ? 'var(--crimson-bright)' : 'var(--text-faint)' }}>
+          {content.length}/500
+        </span>
+        <button onClick={submit} disabled={loading || !content.trim()} className="post-btn">
+          Postar
+        </button>
       </div>
+
       <style>{`
-        .composer { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; }
+        .composer { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+
+        /* Seletor de personagem */
+        .composer-char-row { display: flex; align-items: center; gap: 8px; }
+        .composer-char-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); font-family: var(--font-display); white-space: nowrap; }
+        .composer-char-select { flex: 1; font-size: 13px; font-family: var(--font-display); background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 5px 8px; transition: border-color 0.15s; }
+        .composer-char-select:focus { border-color: var(--gold-dim); outline: none; }
+
         .composer textarea { border: none; background: transparent; resize: none; padding: 0; font-size: 15px; }
         .composer textarea:focus { box-shadow: none; }
-        .composer-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+        .composer-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 8px; border-top: 1px solid var(--border); }
         .post-btn { background: var(--crimson); color: #f0d0d0; font-family: var(--font-display); font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; padding: 6px 20px; border-radius: var(--radius); border: 1px solid rgba(196,48,48,0.3); transition: all 0.15s; }
         .post-btn:hover:not(:disabled) { background: var(--crimson-bright); }
         .post-btn:disabled { opacity: 0.4; cursor: not-allowed; }

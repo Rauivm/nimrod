@@ -8,6 +8,7 @@ import MissionsPage from './pages/MissionsPage.jsx';
 import CemeteryPage from './pages/CemeteryPage.jsx';
 import MapsPage from './pages/MapsPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
+import PatchNotesPage from './pages/PatchNotesPage.jsx';
 
 import SplashScreen from './components/SplashScreen.jsx';
 import LgpdConsentModal from './components/LgpdConsentModal.jsx';
@@ -151,6 +152,11 @@ export default function App() {
             <Route
               path="*"
               element={<Navigate to="/" replace />}
+            />
+
+            <Route
+              path="patch-notes"
+              element={<PatchNotesPage />}
             />
           </Route>
         </Routes>

@@ -33,11 +33,13 @@ import { foundryRoutes } from './routes/foundry.js';
 import { profileRoutes } from './routes/profile.js';
 import { startCemeteryDecay } from './jobs/cemeteryDecay.js';
 import { startFoundryActorSyncJob } from './services/foundrySync.js';
+import { patchNoteRoutes } from './routes/patchNotes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
 mkdirSync(UPLOADS_DIR, { recursive: true });
 mkdirSync(join(UPLOADS_DIR, 'avatars'), { recursive: true });
+mkdirSync(join(UPLOADS_DIR, 'patch-notes'), { recursive: true });
 
 const fastify = Fastify({ logger: true });
 
@@ -119,6 +121,7 @@ await fastify.register(cemeteryCharacterRoutes);
 await fastify.register(mapRoutes);
 await fastify.register(foundryRoutes);
 await fastify.register(profileRoutes);
+await fastify.register(patchNoteRoutes);
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 try {

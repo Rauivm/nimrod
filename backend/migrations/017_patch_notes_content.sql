@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE patch_notes
+ADD COLUMN IF NOT EXISTS content JSONB;
+
+COMMIT;
