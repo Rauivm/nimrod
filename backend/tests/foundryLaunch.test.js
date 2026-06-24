@@ -50,6 +50,8 @@ describe('GET /foundry/launch', () => {
 
     const res = await app.inject({ method: 'GET', url: '/foundry/launch' });
 
+    console.log(res.statusCode);
+    console.log(res.body);
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body).url).toMatch(/\?t=/);
   });

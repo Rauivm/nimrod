@@ -21,6 +21,7 @@ import { ptBR } from 'date-fns/locale';
 const SECTION_MAP = {
   classes: {
     sectionIcon: '⚔',
+    entryFallback: '⚔',
     folder: 'classes',
     entries: {
       paladino: 'paladin',
@@ -46,42 +47,49 @@ const SECTION_MAP = {
 
   itens: {
     sectionIcon: '🛡',
+    entryFallback: '📜',
     folder: 'items',
     entries: {},
   },
 
   sistemas: {
     sectionIcon: '⚙',
+    entryFallback: '⚙',
     folder: 'systems',
     entries: {},
   },
 
   racas: {
     sectionIcon: '🧬',
+    entryFallback: '🧬',
     folder: 'races',
     entries: {},
   },
 
   guilda: {
     sectionIcon: '🏰',
+    entryFallback: '🏰',
     folder: 'guild',
     entries: {},
   },
 
   correcoes: {
     sectionIcon: '🐛',
+    entryFallback: '🐛',
     folder: null,
     entries: {},
   },
 
   ajustes: {
     sectionIcon: '↔',
+    entryFallback: '↔',
     folder: null,
     entries: {},
   },
 
   destaques: {
     sectionIcon: '⚡',
+    entryFallback: '⚡',
     folder: null,
     entries: {},
   },
@@ -118,11 +126,17 @@ function EntryIcon({ sectionTitle, entryName }) {
   const [failed, setFailed] = useState(false);
   const path = getEntryIconPath(sectionTitle, entryName);
   const initial = (entryName?.[0] ?? '?').toUpperCase();
+  const sectionDef = getSectionDef(sectionTitle);
+
+  const fallback =
+    sectionDef.sectionIcon ??
+    sectionDef.entryFallback ??
+    (entryName?.[0] ?? '?').toUpperCase();
 
   if (!path || failed) {
     return (
       <div className="pn-entry-icon pn-entry-icon-fallback">
-        {initial}
+        {fallback}
       </div>
     );
   }
@@ -271,7 +285,7 @@ function PatchNoteCard({ note, isGM, onDeleted, onTogglePublish }) {
                       ? <ChevronDown size={12} />
                       : <ChevronRight size={12} />
                     }
-                    <span className="pn-section-icon">{def.icon}</span>
+                    <span className="pn-section-icon">{def.sectionIcon}</span>
                     {section.title.toUpperCase()}
                   </span>
                   <span className="pn-section-count">{count}</span>
@@ -281,25 +295,57 @@ function PatchNoteCard({ note, isGM, onDeleted, onTogglePublish }) {
                 {isOpen && (
                   <div className="pn-entries">
                     {(section.entries ?? []).map(entry => {
-                      const entryKey  = `${sectionKey}-${entry.name}`;
-                      const entryOpen = openEntries[entryKey] ?? false;
-                      const tag       = (entry.type ?? '').toUpperCase();
+                      const entryKey = `${sectionKey}-${entry.name}`;
+
+                      const autoExpanded =
+                        (section.entries?.length ?? 0) === 1;
+
+                      const entryOpen =
+                        autoExpanded ||
+                        openEntries[entryKey] ||
+                        false;
+
+                      const tag =
+                        (entry.type ?? '').toUpperCase();
 
                       return (
                         <div key={entryKey} className="pn-entry">
-                          {/* Toggle do entry */}
+
+                          {/* Cabeçalho da entry */}
                           <button
                             className="pn-entry-toggle"
-                            onClick={() => toggleEntry(entryKey)}
+                            onClick={() => {
+                              if (!autoExpanded) {
+                                toggleEntry(entryKey);
+                              }
+                            }}
+                            disabled={autoExpanded}
                           >
                             <span className="pn-entry-toggle-left">
                               <EntryIcon
                                 sectionTitle={section.title}
                                 entryName={entry.name}
                               />
-                              <span className="pn-entry-name">{entry.name}</span>
+
+                              <div className="pn-entry-header">
+                                <span className="pn-entry-name">
+                                  {entry.name}
+                                </span>
+
+                                {!entryOpen && entry.changes?.length > 0 && (
+                                  <span className="pn-entry-preview">
+                                    {entry.changes
+                                      .slice(0, 2)
+                                      .map(c => c.label)
+                                      .join(', ')}
+                                  </span>
+                                )}
+                              </div>
                             </span>
-                            <span className={`pn-tag pn-tag-${tag.toLowerCase()}`}>
+
+                            <span
+                              className={`pn-tag pn-tag-${tag.toLowerCase()}`}
+                            >
                               {tag}
                             </span>
                           </button>
@@ -307,16 +353,31 @@ function PatchNoteCard({ note, isGM, onDeleted, onTogglePublish }) {
                           {/* Mudanças */}
                           {entryOpen && entry.changes?.length > 0 && (
                             <div className="pn-entry-body">
+
                               {entry.context && (
-                                <p className="pn-entry-context">{entry.context}</p>
+                                <p className="pn-entry-context">
+                                  {entry.context}
+                                </p>
                               )}
+
                               <div className="pn-changes">
                                 {entry.changes.map((ch, i) => (
                                   <div key={i} className="pn-change">
-                                    <span className="pn-change-label">{ch.label}</span>
-                                    <span className="pn-old">{ch.old}</span>
-                                    <span className="pn-arrow">→</span>
-                                    <span className="pn-new">{ch.new}</span>
+                                    <span className="pn-change-label">
+                                      {ch.label}
+                                    </span>
+
+                                    <span className="pn-old">
+                                      {ch.old}
+                                    </span>
+
+                                    <span className="pn-arrow">
+                                      →
+                                    </span>
+
+                                    <span className="pn-new">
+                                      {ch.new}
+                                    </span>
                                   </div>
                                 ))}
                               </div>
@@ -397,7 +458,7 @@ function PatchNoteCard({ note, isGM, onDeleted, onTogglePublish }) {
         .pn-section-toggle:hover { background: rgba(201,168,76,.10); }
         .pn-section-toggle-left { display: flex; align-items: center; gap: 7px; }
         .pn-section-icon { font-size: 14px; line-height: 1; }
-        .pn-section-count { font-size: 11px; color: var(--text-faint); font-family: var(--font-mono); background: rgba(255,255,255,.05); border: 1px solid var(--border); border-radius: 3px; padding: 0 6px; }
+        .pn-section-count { font-size: 11px; color: var(--text); font-family: var(--font-mono); background: rgba(255,255,255,.05); border: 1px solid var(--border); border-radius: 3px; padding: 0 6px; }
 
         /* ── Entries ── */
         .pn-entries { display: flex; flex-direction: column; gap: 6px; padding: 8px 0 2px; }
@@ -418,15 +479,19 @@ function PatchNoteCard({ note, isGM, onDeleted, onTogglePublish }) {
 
         /* Corpo do entry (mudanças) */
         .pn-entry-body { padding: 10px 14px 12px; border-top: 1px solid rgba(201,168,76,.08); display: flex; flex-direction: column; gap: 8px; }
-        .pn-entry-context { font-size: 12px; color: var(--text-muted); line-height: 1.6; font-style: italic; margin: 0; padding: 8px 10px; border-left: 2px solid var(--gold-dim); background: rgba(201,168,76,.04); border-radius: 0 4px 4px 0; }
+        .pn-entry-context { font-size: 12px; color: var(--text-muted); line-height: 1.6; font-style: italic; margin: 0; padding: 8px 10px;
+         border-left: 2px solid var(--gold-dim); background: rgba(201,168,76,.04); border-radius: 0 4px 4px 0; }
+        .pn-entry-preview { font-size: 12px; color: var(--text); margin-top: 4px; }
 
         .pn-changes { display: flex; flex-direction: column; }
         .pn-change { display: grid; grid-template-columns: 140px 1fr 18px 1fr; align-items: center; gap: 0 10px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.04); font-size: 13px; }
         .pn-change:last-child { border-bottom: none; }
-        .pn-change-label { color: var(--text-faint); font-size: 12px; }
+        .pn-change-label { color: var(--text); font-size: 13px; font-weight: 600; }
         .pn-old  { color: #c66; text-decoration: line-through; font-family: var(--font-mono); font-size: 12px; text-align: right; }
         .pn-arrow { color: var(--text-faint); text-align: center; opacity: .6; }
         .pn-new  { color: #6ccf7c; font-weight: 700; font-family: var(--font-mono); font-size: 13px; }
+        .pn-entry-header { display: flex; flex-direction: column; align-items: flex-start; }
+        .pn-entry-preview { font-size: 12px; color: var(--text); margin-top: 2px; }
 
         /* Tags BUFF / NERF / AJUSTE / NOVO */
         .pn-tag { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 9px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; flex-shrink: 0; }
@@ -626,7 +691,7 @@ function PatchNoteForm({ onClose, onCreate }) {
               <div key={si} className="pnf-section">
                 <div className="pnf-section-header">
                   <span className="pnf-section-label">
-                    {def.icon} {section.title.toUpperCase()}
+                    {def.sectionIcon} {section.title.toUpperCase()}
                   </span>
                   <button onClick={() => removeSection(si)} className="pnf-icon-btn pnf-btn-danger"
                     title="Remover seção"><X size={12} /></button>

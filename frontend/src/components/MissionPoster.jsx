@@ -4,6 +4,7 @@ import { ptBR } from 'date-fns/locale';
 import { Users, Calendar, Coins, Edit3, Trash2, X, Check, UserPlus, ChevronDown, ChevronUp, Scroll } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import JoinMissionModal from './JoinMissionModal.jsx';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -177,6 +178,7 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
   const [inviteUsers, setInviteUsers] = useState([]);
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({});
+  const [showJoinModal, setShowJoinModal] = useState(false);
 
   useEffect(() => {
     setLocalMission(initialMission);
@@ -216,21 +218,13 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
     else onUpdate?.();
   }, [onUpdate]);
 
-  const join = async () => {
-    const previous = mission;
-    setLocalMission(m => ({
-      ...m,
-      user_joined: true,
-      player_count: String((parseInt(m.player_count) || 0) + (playersFull ? 0 : 1)),
-      reserve_count: String((parseInt(m.reserve_count) || 0) + (playersFull ? 1 : 0)),
-    }));
-    setLoading(true);
-    try {
-      const res = await api.post(`/missions/${mission.id}/join`, {});
-      emitMission(res.mission);
-    }
-    catch (e) { setLocalMission(previous); alert(e.message); }
-    setLoading(false);
+  // Opens the character-picker modal instead of joining directly
+  const join = () => {
+    setShowJoinModal(true);
+  };
+
+  const handleJoined = (res) => {
+    emitMission(res.mission);
   };
   const leave = async () => {
     const previous = mission;
@@ -290,10 +284,11 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
   const datetime = mission.datetime ? new Date(mission.datetime) : null;
 
   return (
-    <div
-      className={`poster-wrap ${isDimmed ? 'poster-dimmed' : ''} ${expanded ? 'poster-expanded-wrap' : ''}`}
-      style={{ '--rot': `${rotation}deg` }}
-    >
+    <>
+      <div
+        className={`poster-wrap ${isDimmed ? 'poster-dimmed' : ''} ${expanded ? 'poster-expanded-wrap' : ''}`}
+        style={{ '--rot': `${rotation}deg` }}
+      >
       <div className="poster" onClick={() => !expanded && setExpanded(true)}>
 
         {/* Banner */}
@@ -721,5 +716,15 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
         .poster-corner-br { bottom:0; right:0; background: radial-gradient(circle at 100% 100%, transparent 55%, rgba(60,30,5,0.45) 100%); }
       `}</style>
     </div>
+
+    {showJoinModal && (
+      <JoinMissionModal
+        mission={mission}
+        playersFull={playersFull}
+        onClose={() => setShowJoinModal(false)}
+        onJoined={handleJoined}
+      />
+    )}
+  </>
   );
 });

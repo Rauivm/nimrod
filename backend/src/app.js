@@ -90,7 +90,9 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
       return reply.code(401).send({ error: 'Unauthorized' });
     }
 
-    const foundryBaseUrl = PUBLIC_FOUNDRY_URL;
+    const foundryBaseUrl =
+      (process.env.FOUNDRY_PUBLIC_URL || process.env.FOUNDRY_URL)
+        ?.replace(/\/$/, '');
     const mapping        = await resolveFoundryMapping(dbPool, req.user.email);
     const { role, world, actor_name } = mapping;
 

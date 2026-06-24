@@ -344,6 +344,8 @@ export async function missionRoutes(fastify) {
   fastify.post('/missions/:id/join', async (req, reply) => {
     if (!assertRateLimit(req, reply, 'missions:join', { limit: 20, windowMs: 60_000 })) return reply;
     const { id } = req.params;
+    const { characterId } = req.body ?? {};
+
     const mission = await query('SELECT * FROM missions WHERE id = $1', [id]);
     if (!mission.rows.length) return reply.code(404).send({ error: 'Mission not found' });
 
@@ -356,6 +358,19 @@ export async function missionRoutes(fastify) {
       [id, req.user.id]
     );
     if (existing.rows.length) return reply.code(400).send({ error: 'Already joined' });
+
+    // Validate characterId if provided: must belong to this user
+    let resolvedCharId = null;
+    if (characterId) {
+      const charRes = await query(
+        'SELECT id FROM player_characters WHERE id = $1 AND user_id = $2 AND active = TRUE',
+        [characterId, req.user.id]
+      );
+      if (!charRes.rows.length) {
+        return reply.code(400).send({ error: 'Personagem inválido ou não pertence à sua conta' });
+      }
+      resolvedCharId = charRes.rows[0].id;
+    }
 
     const counts = await query(
       `SELECT COUNT(CASE WHEN type = 'PLAYER' THEN 1 END) as players,
@@ -371,8 +386,9 @@ export async function missionRoutes(fastify) {
     else return reply.code(400).send({ error: 'Queue full' });
 
     await query(
-      'INSERT INTO mission_participants (mission_id, user_id, type) VALUES ($1, $2, $3)',
-      [id, req.user.id, type]
+      `INSERT INTO mission_participants (mission_id, user_id, type, character_id)
+       VALUES ($1, $2, $3, $4)`,
+      [id, req.user.id, type, resolvedCharId]
     );
 
     const updated = await getMissionWithCounts(id, req.user.id);

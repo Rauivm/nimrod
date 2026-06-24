@@ -4,6 +4,7 @@ import { ptBR } from 'date-fns/locale';
 import { Users, MapPin, Calendar, Coins, Star, ChevronDown, ChevronUp, Crown, Shield, Edit3, Trash2, X, Check, UserPlus } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import JoinMissionModal from './JoinMissionModal.jsx';
 
 function StarRating({ missionId, avgRating, ratingCount, canRate, onRated }) {
   const [hovered, setHovered] = useState(0);
@@ -58,6 +59,7 @@ export function MissionCard({ mission, onUpdate, compact = false }) {
   const [users, setUsers] = useState([]);
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({});
+  const [showJoinModal, setShowJoinModal] = useState(false);
 
   const isCreator = user?.id === mission.creator_id;
   const isGM = user?.role === 'GM';
@@ -75,14 +77,9 @@ export function MissionCard({ mission, onUpdate, compact = false }) {
   };
   const statusLabel = { OPEN: 'Aberta', CLOSED: 'Fechada', FINISHED: 'Concluída' };
 
-  const join = async () => {
-    setLoading(true);
-    try {
-      const res = await api.post(`/missions/${mission.id}/join`, {});
-      onUpdate?.();
-    } catch (e) { alert(e.message); }
-    setLoading(false);
-  };
+  const join = () => setShowJoinModal(true);
+
+  const handleJoined = () => { onUpdate?.(); };
 
   const leave = async () => {
     setLoading(true);
@@ -137,6 +134,7 @@ export function MissionCard({ mission, onUpdate, compact = false }) {
   const isClosed = mission.status === 'CLOSED';
 
   return (
+    <>
     <div className={`mission-card ${isFinished || isClosed ? 'greyed' : ''}`}>
       <div className="mission-header">
         <div style={{ flex: 1 }}>
@@ -319,5 +317,15 @@ export function MissionCard({ mission, onUpdate, compact = false }) {
         .btn-danger-sm:hover { background: rgba(139,32,32,0.2); color: var(--crimson-bright); }
       `}</style>
     </div>
+
+    {showJoinModal && (
+      <JoinMissionModal
+        mission={mission}
+        playersFull={playersFull}
+        onClose={() => setShowJoinModal(false)}
+        onJoined={handleJoined}
+      />
+    )}
+    </>
   );
 }
