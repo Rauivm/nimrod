@@ -28,7 +28,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       PORT:         3001
-      NODE_ENV:     development
+      NODE_ENV:     production
       UPLOADS_DIR:  /app/uploads
       # DEV_USER_EMAIL: test@local.dev
       # DEV_USER_ROLE:       GM   
