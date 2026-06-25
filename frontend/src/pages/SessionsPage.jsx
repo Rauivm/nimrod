@@ -24,7 +24,7 @@ import {
   BookOpen, Plus, X, ChevronDown, ChevronUp,
   Scroll, Coins, Star, Beaker, Zap, Heart, Package,
   Pencil, Trash2, Filter, AlertCircle,
-  CheckCircle, Lock,
+  CheckCircle, Lock, Copy, Check,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -177,8 +177,64 @@ function SessionBadge({ status }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Componente: SessionItem — item na lista lateral
+// Componente: SessionIdBadge — exibe UUID com botão copiar
+// Usado pelo GM para configurar o activeSessionId no módulo Foundry.
 // ─────────────────────────────────────────────────────────────────────────────
+
+function SessionIdBadge({ id }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy(e) {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback para ambientes sem clipboard API (ex: HTTP)
+      const ta = document.createElement('textarea');
+      ta.value = id;
+      ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }
+
+  // Exibe apenas os primeiros 8 caracteres para não poluir visualmente
+  const short = id.slice(0, 8) + '…';
+
+  return (
+    <button
+      onClick={handleCopy}
+      title={`ID da sessão (clique para copiar):\n${id}\n\nCole este valor no campo "Active Session ID"\nnas configurações do módulo nimrod-session no Foundry.`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '2px 7px 2px 6px',
+        background: copied ? 'rgba(26,92,58,0.2)' : 'rgba(201,168,76,0.06)',
+        border: `1px solid ${copied ? 'var(--emerald)' : 'var(--border)'}`,
+        borderRadius: 3, cursor: 'pointer',
+        transition: 'all 0.15s',
+        flexShrink: 0,
+      }}
+    >
+      <span style={{
+        fontFamily: 'var(--font-mono)', fontSize: 10,
+        color: copied ? 'var(--emerald-bright)' : 'var(--text-faint)',
+        letterSpacing: '0.3px', userSelect: 'none',
+      }}>
+        {copied ? 'copiado!' : short}
+      </span>
+      {copied
+        ? <Check size={10} style={{ color: 'var(--emerald-bright)', flexShrink: 0 }} />
+        : <Copy size={10} style={{ color: 'var(--text-faint)', flexShrink: 0 }} />
+      }
+    </button>
+  );
+}
 
 const SessionItem = memo(function SessionItem({ session, active, onClick }) {
   return (
@@ -218,6 +274,9 @@ const SessionItem = memo(function SessionItem({ session, active, onClick }) {
             {session.eventCount} evento{session.eventCount !== 1 ? 's' : ''}
           </span>
         )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <SessionIdBadge id={session.id} />
       </div>
       {session.campaign && (
         <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
@@ -591,14 +650,34 @@ function CloseSessionModal({ session, onClose, onClosed }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Hook: useSessionPlayers
+// Busca jogadores com personagens elegíveis do backend — independente dos eventos.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function useSessionPlayers() {
+  const [players, setPlayers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/sessions/players-with-characters')
+      .then(data => setPlayers(data ?? []))
+      .catch(() => setPlayers([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { players, loading };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Componente: EventFormDrawer — formulário de entrada manual
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EventFormDrawer({ session, players, onClose, onCreated }) {
+function EventFormDrawer({ session, onClose, onCreated }) {
+  const { players, loading: loadingPlayers } = useSessionPlayers();
+
   const EMPTY = {
-    playerId: '', actorName: '', resourceType: 'gold',
+    playerId: '', characterId: '', resourceType: 'gold',
     delta: '', description: '', deltaMeta: '',
-    source: 'manual',
   };
   const [form, setForm]   = useState(EMPTY);
   const [busy, setBusy]   = useState(false);
@@ -610,18 +689,21 @@ function EventFormDrawer({ session, players, onClose, onCreated }) {
     setForm(f => ({ ...f, [k]: e.target.value }));
   };
 
-  // Preenche actorName ao selecionar jogador
-  function selectPlayer(e) {
-    const id = e.target.value;
-    const p  = players.find(x => x.id === id);
-    setForm(f => ({ ...f, playerId: id, actorName: p?.actorName ?? f.actorName }));
+  // Ao trocar jogador, limpa personagem selecionado
+  function handlePlayerChange(e) {
+    setError(''); setOk(false);
+    setForm(f => ({ ...f, playerId: e.target.value, characterId: '' }));
   }
+
+  // Personagens elegíveis do jogador selecionado
+  const availableChars = players.find(p => p.id === form.playerId)?.characters ?? [];
 
   async function submit(e) {
     e.preventDefault();
     const deltaNum = parseFloat(form.delta);
-    if (!form.playerId)           { setError('Selecione um jogador.'); return; }
-    if (!form.actorName.trim())   { setError('Nome do personagem é obrigatório.'); return; }
+
+    if (!form.playerId)                                   { setError('Selecione um jogador.'); return; }
+    if (!form.characterId)                                { setError('Selecione um personagem.'); return; }
     if (!form.delta || isNaN(deltaNum) || deltaNum === 0) { setError('Delta deve ser um número diferente de zero.'); return; }
 
     let parsedMeta = {};
@@ -634,7 +716,7 @@ function EventFormDrawer({ session, players, onClose, onCreated }) {
     try {
       const event = await api.post(`/sessions/${session.id}/events`, {
         playerId:     form.playerId,
-        actorName:    form.actorName.trim(),
+        characterId:  form.characterId,
         resourceType: form.resourceType,
         delta:        deltaNum,
         description:  form.description.trim() || null,
@@ -643,7 +725,8 @@ function EventFormDrawer({ session, players, onClose, onCreated }) {
       });
       onCreated(event);
       setOk(true);
-      setForm(f => ({ ...EMPTY, playerId: f.playerId, actorName: f.actorName }));
+      // Preserva jogador e personagem para facilitar múltiplos registros em sequência
+      setForm(f => ({ ...EMPTY, playerId: f.playerId, characterId: f.characterId }));
     } catch (err) {
       setError(err.message || 'Erro ao registrar evento.');
     } finally {
@@ -692,22 +775,50 @@ function EventFormDrawer({ session, players, onClose, onCreated }) {
       {/* Form */}
       <form onSubmit={submit} style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
 
+        {/* Jogador */}
         <FormField label="Jogador *" htmlFor="ev-player">
-          <select id="ev-player" value={form.playerId} onChange={selectPlayer}>
-            <option value="">Selecione...</option>
-            {players.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
+          <select
+            id="ev-player"
+            value={form.playerId}
+            onChange={handlePlayerChange}
+            disabled={loadingPlayers}
+          >
+            <option value="">
+              {loadingPlayers ? 'Carregando...' : 'Selecione...'}
+            </option>
+            {players
+              .filter(p => p.characters.length > 0)
+              .map(p => (
+                <option key={p.id} value={p.id}>{p.displayName}</option>
+              ))
+            }
+          </select>
+        </FormField>
+
+        {/* Personagem — carregado dinamicamente após selecionar jogador */}
+        <FormField label="Personagem *" htmlFor="ev-character">
+          <select
+            id="ev-character"
+            value={form.characterId}
+            onChange={set('characterId')}
+            disabled={!form.playerId || availableChars.length === 0}
+          >
+            <option value="">
+              {!form.playerId
+                ? 'Selecione um jogador primeiro'
+                : availableChars.length === 0
+                  ? 'Sem personagens ativos'
+                  : 'Selecione...'}
+            </option>
+            {availableChars.map(ch => (
+              <option key={ch.id} value={ch.id}>
+                {ch.name}{ch.level ? ` (Nível ${ch.level})` : ''}
+              </option>
             ))}
           </select>
         </FormField>
 
-        <FormField label="Personagem *" htmlFor="ev-actor">
-          <input
-            id="ev-actor" value={form.actorName} onChange={set('actorName')}
-            placeholder="Nome do personagem"
-          />
-        </FormField>
-
+        {/* Tipo de recurso */}
         <FormField label="Tipo de recurso *" htmlFor="ev-type">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
             {RESOURCE_TYPES.map(r => {
@@ -737,6 +848,7 @@ function EventFormDrawer({ session, players, onClose, onCreated }) {
           </div>
         </FormField>
 
+        {/* Delta */}
         <FormField label="Delta (+ ganho / − gasto) *" htmlFor="ev-delta">
           <div style={{ position: 'relative' }}>
             <input
@@ -753,6 +865,7 @@ function EventFormDrawer({ session, players, onClose, onCreated }) {
           </div>
         </FormField>
 
+        {/* Descrição */}
         <FormField label="Descrição" htmlFor="ev-desc">
           <input
             id="ev-desc" value={form.description} onChange={set('description')}
@@ -760,6 +873,7 @@ function EventFormDrawer({ session, players, onClose, onCreated }) {
           />
         </FormField>
 
+        {/* Metadados */}
         <FormField label="Metadados (JSON opcional)" htmlFor="ev-meta">
           <input
             id="ev-meta" value={form.deltaMeta} onChange={set('deltaMeta')}
@@ -771,7 +885,7 @@ function EventFormDrawer({ session, players, onClose, onCreated }) {
         {error && <ErrorMsg>{error}</ErrorMsg>}
         {ok    && <SuccessMsg>Evento registrado!</SuccessMsg>}
 
-        <PrimaryBtn type="submit" disabled={busy} style={{ marginTop: 4 }}>
+        <PrimaryBtn type="submit" disabled={busy || loadingPlayers} style={{ marginTop: 4 }}>
           {busy ? 'Registrando...' : 'Registrar Evento'}
         </PrimaryBtn>
       </form>
@@ -1237,7 +1351,7 @@ export default function SessionsPage() {
           {activeSession ? (
             <>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <span style={{
                     fontFamily: 'var(--font-display)', fontSize: 14,
                     color: 'var(--text)', letterSpacing: '0.3px',
@@ -1246,6 +1360,7 @@ export default function SessionsPage() {
                     {activeSession.title}
                   </span>
                   <SessionBadge status={activeSession.status} />
+                  <SessionIdBadge id={activeSession.id} />
                 </div>
                 {activeSession.campaign && (
                   <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{activeSession.campaign}</span>
@@ -1354,7 +1469,6 @@ export default function SessionsPage() {
       {showDrawer && activeSession && (
         <EventFormDrawer
           session={activeSession}
-          players={playerOptions}
           onClose={() => setShowDrawer(false)}
           onCreated={handleEventCreated}
         />

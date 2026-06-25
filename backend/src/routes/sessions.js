@@ -129,7 +129,15 @@ const SESSION_SELECT = `
          ON rd.session_id = sl.id AND rd.deleted_at IS NULL
 `;
 
+// Regex UUID v4 — evita que strings inválidas causem erro 500 no PostgreSQL
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isValidUuid(v) {
+  return typeof v === 'string' && UUID_RE.test(v);
+}
+
 async function fetchSession(id) {
+  if (!isValidUuid(id)) return null;
   const res = await query(
     `${SESSION_SELECT}
      WHERE sl.id = $1 AND sl.deleted_at IS NULL
@@ -173,14 +181,17 @@ function validateSessionBody(body, reply) {
 }
 
 function validateEventBody(body, reply) {
-  const { playerId, actorName, resourceType, delta } = body ?? {};
+  // characterId é opcional: quando fornecido, actorName é derivado do banco.
+  // Quando ausente, actorName é obrigatório (compatibilidade com source=foundry).
+  const { playerId, actorName, characterId, resourceType, delta } = body ?? {};
 
   if (!playerId?.trim()) {
     reply.code(400).send({ error: 'playerId é obrigatório.' });
     return false;
   }
-  if (!actorName?.trim()) {
-    reply.code(400).send({ error: 'actorName é obrigatório.' });
+  // actorName é obrigatório apenas quando characterId não está presente
+  if (!characterId && !actorName?.trim()) {
+    reply.code(400).send({ error: 'actorName ou characterId é obrigatório.' });
     return false;
   }
   if (!VALID_RESOURCE_TYPES.has(resourceType)) {
@@ -201,6 +212,71 @@ function validateEventBody(body, reply) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function sessionRoutes(fastify) {
+
+  // ── GET /sessions/players-with-characters ─────────────────────────────────
+  // Retorna todos os jogadores (PLAYER, GM, GM_PRINCIPAL) com seus personagens
+  // ativos, vivos e não aposentados. Usado pelo formulário de registro de evento.
+  // Qualquer GM pode acessar.
+  fastify.get('/sessions/players-with-characters', async (req, reply) => {
+    if (!requireGM(req, reply)) return reply;
+
+    // Busca todos os usuários que têm ao menos um personagem ativo vinculado,
+    // mais todos os usuários (para cobrir GMs sem personagem que podem aparecer
+    // em eventos históricos de outros módulos).
+    const usersRes = await query(
+      `SELECT
+         u.id,
+         COALESCE(u.display_name, u.name) AS display_name,
+         u.role,
+         u.avatar_url
+       FROM users u
+       ORDER BY u.display_name NULLS LAST, u.name`,
+    );
+
+    // Busca todos os personagens ativos, vivos e não-aposentados, agrupados por user_id
+    const charsRes = await query(
+      `SELECT
+         pc.id,
+         pc.user_id,
+         pc.name,
+         pc.level,
+         pc.token_img,
+         pc.foundry_actor_id
+       FROM player_characters pc
+       WHERE
+         pc.user_id  IS NOT NULL
+         AND pc.active   = TRUE
+         AND pc.retired  = FALSE
+         AND pc.dead     = FALSE
+       ORDER BY pc.name ASC`,
+    );
+
+    // Agrupa personagens por user_id
+    const charsByUser = new Map();
+    for (const ch of charsRes.rows) {
+      const list = charsByUser.get(ch.user_id) ?? [];
+      list.push({
+        id:             ch.id,
+        name:           ch.name,
+        level:          ch.level,
+        tokenImg:       ch.token_img,
+        foundryActorId: ch.foundry_actor_id,
+      });
+      charsByUser.set(ch.user_id, list);
+    }
+
+    // Só retorna usuários que têm ao menos 1 personagem elegível,
+    // mais qualquer usuário que já apareceu em eventos desta ou de outras sessões
+    // (para não omitir GMs ou jogadores sem personagem no select).
+    // A decisão de mostrar ou não usuários sem personagem fica no frontend.
+    return usersRes.rows.map(u => ({
+      id:          u.id,
+      displayName: u.display_name,
+      role:        u.role,
+      avatarUrl:   u.avatar_url ?? null,
+      characters:  charsByUser.get(u.id) ?? [],
+    }));
+  });
 
   // ── POST /sessions ─────────────────────────────────────────────────────────
   // Abre uma nova sessão. Apenas GM_PRINCIPAL.
@@ -419,6 +495,12 @@ export async function sessionRoutes(fastify) {
     if (!requireGM(req, reply)) return reply;
     if (!assertRateLimit(req, reply, 'sessions:events', { limit: 120, windowMs: 60_000 })) return reply;
 
+    if (!isValidUuid(req.params.id)) {
+      return reply.code(400).send({
+        error: `ID de sessão inválido: "${req.params.id}". O campo activeSessionId no módulo Foundry deve conter o UUID da sessão (ex: "a1b2c3d4-..."), não um número.`,
+      });
+    }
+
     const session = await query(
       `SELECT id, status, narrator_ids FROM session_logs WHERE id = $1 AND deleted_at IS NULL`,
       [req.params.id],
@@ -439,7 +521,7 @@ export async function sessionRoutes(fastify) {
 
     const {
       playerId,
-      actorName,
+      characterId    = null,
       resourceType,
       delta,
       valueBefore    = null,
@@ -454,9 +536,52 @@ export async function sessionRoutes(fastify) {
     const resolvedSource = VALID_SOURCES.has(source) ? source : 'manual';
 
     // Verifica se jogador existe
+    if (!isValidUuid(playerId)) {
+      return reply.code(400).send({ error: `playerId inválido: "${playerId}". Deve ser um UUID.` });
+    }
     const playerCheck = await query('SELECT id FROM users WHERE id = $1', [playerId]);
     if (!playerCheck.rows.length) {
       return reply.code(400).send({ error: 'playerId não encontrado.' });
+    }
+
+    // Resolve actorName: se characterId foi fornecido, valida e deriva o nome
+    let resolvedActorName = req.body.actorName?.trim() ?? null;
+
+    if (characterId) {
+      if (!isValidUuid(characterId)) {
+        return reply.code(400).send({ error: `characterId inválido: "${characterId}". Deve ser um UUID.` });
+      }
+      const charCheck = await query(
+        `SELECT id, name, user_id, active, retired, dead
+         FROM player_characters
+         WHERE id = $1`,
+        [characterId],
+      );
+
+      if (!charCheck.rows.length) {
+        return reply.code(400).send({ error: 'Personagem não encontrado.' });
+      }
+
+      const ch = charCheck.rows[0];
+
+      if (ch.user_id !== playerId) {
+        return reply.code(400).send({ error: 'Personagem não pertence ao jogador informado.' });
+      }
+      if (!ch.active) {
+        return reply.code(400).send({ error: 'Personagem inativo.' });
+      }
+      if (ch.retired) {
+        return reply.code(400).send({ error: 'Personagem aposentado.' });
+      }
+      if (ch.dead) {
+        return reply.code(400).send({ error: 'Personagem morto.' });
+      }
+
+      resolvedActorName = ch.name;
+    }
+
+    if (!resolvedActorName) {
+      return reply.code(400).send({ error: 'actorName ou characterId válido é obrigatório.' });
     }
 
     let res;
@@ -474,7 +599,7 @@ export async function sessionRoutes(fastify) {
         [
           req.params.id,
           playerId,
-          actorName.trim(),
+          resolvedActorName,
           req.user.id,
           resolvedSource,
           resourceType,
@@ -515,6 +640,10 @@ export async function sessionRoutes(fastify) {
   // Lista eventos de uma sessão com filtros e paginação.
   fastify.get('/sessions/:id/events', async (req, reply) => {
     if (!requireGM(req, reply)) return reply;
+
+    if (!isValidUuid(req.params.id)) {
+      return reply.code(400).send({ error: `ID de sessão inválido: "${req.params.id}".` });
+    }
 
     const session = await query(
       `SELECT id, narrator_ids FROM session_logs WHERE id = $1 AND deleted_at IS NULL`,
@@ -572,6 +701,10 @@ export async function sessionRoutes(fastify) {
   // Edição retroativa de um evento. Apenas GM_PRINCIPAL. Requer editReason.
   fastify.patch('/sessions/:id/events/:eid', async (req, reply) => {
     if (!requireGMPrincipal(req, reply)) return reply;
+
+    if (!isValidUuid(req.params.id) || !isValidUuid(req.params.eid)) {
+      return reply.code(400).send({ error: 'ID de sessão ou evento inválido.' });
+    }
 
     const { editReason, delta, valueBefore, valueAfter, deltaMeta, description, occurredAt } = req.body ?? {};
 
@@ -655,6 +788,10 @@ export async function sessionRoutes(fastify) {
   // Apenas GM_PRINCIPAL. Requer deleteReason.
   fastify.delete('/sessions/:id/events/:eid', async (req, reply) => {
     if (!requireGMPrincipal(req, reply)) return reply;
+
+    if (!isValidUuid(req.params.id) || !isValidUuid(req.params.eid)) {
+      return reply.code(400).send({ error: 'ID de sessão ou evento inválido.' });
+    }
 
     const { deleteReason } = req.body ?? {};
     if (!deleteReason?.trim()) {
