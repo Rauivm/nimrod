@@ -11,7 +11,7 @@
 
 // Usa a origem da própria página para evitar Mixed Content (HTTP em HTTPS)
 // e ERR_CONNECTION_REFUSED. O reverse proxy roteia /bridge/* → 127.0.0.1:3999.
-const BRIDGE_URL  = `${window.location.origin}/bridge`;
+//const BRIDGE_URL  = `${window.location.origin}/bridge`;
 const DEBOUNCE_MS = 2_000;
 
 function getBridgeUrl() {

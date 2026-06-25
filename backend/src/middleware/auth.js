@@ -37,62 +37,63 @@
 import { query } from '../db/index.js';
 
 const FALLBACK_NAMES = [
-  'Rapariga', 'Quenga', 'Bitch', 'Raissa Rayana', 'Bala Halls', 'Rapariga','Aventureiro', 'Forasteiro', 'Errante', 'Peregrino', 'Desconhecido',
+  'Rapariga', 'Quenga', 'Bitch', 'Raissa Rayana', 'Bala Halls', 'Rapariga', 'Aventureiro', 'Forasteiro', 'Errante', 'Peregrino', 'Desconhecido',
 ];
 
 const IS_DEV = process.env.NODE_ENV !== 'production';
- 
+
 export async function cfAuthMiddleware(request, reply) {
- 
-  // ── 1. Header X-Dev-User (dev only, multi-usuário) ───────────────────────
-  // Permite trocar de usuário por request sem reiniciar o servidor.
+
+  // ── Modo desenvolvimento: X-Dev-User header (multi-usuário) ──────────────
+  // Permite simular qualquer usuário sem reiniciar o servidor.
   // Bloqueado em produção por IS_DEV.
+  // O usuário deve existir no banco (criado via dev_seed_users.sql).
   if (IS_DEV) {
     const devSwitchEmail = request.headers['x-dev-user']?.trim().toLowerCase();
     if (devSwitchEmail) {
-      // Busca o usuário existente no banco (não faz upsert — o usuário
-      // deve existir, criado via dev_seed_users.sql)
       const res = await query(
-        'SELECT * FROM users WHERE email = $1 AND deleted_at IS NULL',
+        'SELECT * FROM users WHERE email = $1',
         [devSwitchEmail],
       );
       if (res.rows.length) {
         request.user = res.rows[0];
         return;
       }
-      // Email não encontrado → avisa e cai no fluxo normal
+      // Email não encontrado → loga e cai no fluxo normal
       request.log?.warn(`X-Dev-User: email "${devSwitchEmail}" não encontrado no banco.`);
     }
   }
- 
-  // ── 2. DEV_USER_EMAIL no .env (usuário fixo, comportamento original) ──────
+
+  // ── Modo desenvolvimento: DEV_USER_EMAIL no .env (usuário fixo) ──────────
+  // Ativo apenas quando DEV_USER_EMAIL está no .env.
+  // Em produção esse bloco nunca executa (variável não existe).
   const devEmail = process.env.DEV_USER_EMAIL?.trim();
   if (devEmail) {
     const devName = process.env.DEV_USER_NAME?.trim() || 'Dev User';
     const devRole = process.env.DEV_USER_ROLE?.trim() || 'GM';
-    request.user  = await upsertUser(devEmail, devName, devRole, true);
+    request.user = await upsertUser(devEmail, devName, devRole, true);
     return;
   }
- 
-  // ── 3. Produção: Cloudflare Access ───────────────────────────────────────
+
+  // ── Produção: header injetado pelo Cloudflare Access ─────────────────────
   const email = request.headers['cf-access-authenticated-user-email']?.trim().toLowerCase();
- 
+
   if (!email) {
     if (reply) return reply.code(401).send({ error: 'Unauthorized' });
     throw new Error('Unauthorized');
   }
- 
+
   const cfName = request.headers['cf-access-user-name']?.trim();
-  const name   = cfName || email.split('@')[0];
- 
+  const name = cfName || email.split('@')[0];
+
   request.user = await upsertUser(
     email,
     name,
     process.env.DEV_USER_ROLE ?? 'PLAYER',
-    false,
+    false
   );
 }
- 
+
 async function upsertUser(email, name, role, forceRole) {
   const sql = forceRole
     ? `INSERT INTO users (email, name, role)
@@ -106,11 +107,16 @@ async function upsertUser(email, name, role, forceRole) {
        ON CONFLICT (email) DO UPDATE
          SET name = EXCLUDED.name
        RETURNING *`;
- 
+
   const res = await query(sql, [email, name, role]);
   return res.rows[0];
 }
- 
+
 export function pickFallbackName() {
-  return FALLBACK_NAMES[Math.floor(Math.random() * FALLBACK_NAMES.length)];
+  return FALLBACK_NAMES[Math.floor(Math.random() * FALLBACK_NAMES.length)]
+}
+const GM_ROLES = new Set(['GM', 'GM_PRINCIPAL']);
+
+export function isGM(role) {
+  return GM_ROLES.has(role);
 }

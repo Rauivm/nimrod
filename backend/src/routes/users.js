@@ -1,6 +1,6 @@
 import { query } from '../db/index.js';
 import { getOnlineUserIds, broadcast } from '../ws/broadcast.js';
-import { pickFallbackName } from '../middleware/auth.js';
+import { pickFallbackName, isGM } from '../middleware/auth.js';
 
 export async function userRoutes(fastify) {
 
@@ -104,7 +104,7 @@ export async function userRoutes(fastify) {
       },
     },
   }, async (req, reply) => {
-    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
+    if (!isGM(req.user.role)) return reply.code(403).send({ error: 'GM only' });
 
     const res = await query(
       'UPDATE users SET role = $1 WHERE id = $2 RETURNING *',
@@ -128,11 +128,11 @@ export async function configRoutes(fastify) {
 // Single place that decides what /me returns — never exposes raw email.
 function serializeMe(u) {
   return {
-    id:          u.id,
-    email:       maskEmail(u.email),
-    role:        u.role,
+    id: u.id,
+    email: maskEmail(u.email),
+    role: u.role,
     displayName: u.display_name ?? null,   // null = needs first-login modal
-    avatarUrl:    u.avatar_url ?? null,
+    avatarUrl: u.avatar_url ?? null,
     lgpdConsent: u.lgpd_consent ?? true, // default to true for legacy users --- IGNORE ---
   };
 }

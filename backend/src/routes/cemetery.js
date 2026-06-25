@@ -296,7 +296,7 @@ export async function cemeteryCharacterRoutes(fastify) {
     if (!char.rows.length) return reply.code(404).send({ error: 'Character not found' });
 
     const isOwner = char.rows[0].user_id === req.user.id;
-    const isGM    = req.user.role === 'GM';
+    const isGM    = req.user.role === 'GM' || req.user.role === 'GM_PRINCIPAL';;
     if (!isOwner && !isGM) return reply.code(403).send({ error: 'Forbidden' });
 
     const data = await req.file();

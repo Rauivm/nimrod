@@ -22,11 +22,11 @@ import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
 
 const ALLOWED_IMG_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
-const MAX_AVATAR_BYTES  = 4 * 1024 * 1024; // 4 MB
+const MAX_AVATAR_BYTES = 4 * 1024 * 1024; // 4 MB
 
 function avatarsDir() {
   const base = process.env.UPLOADS_DIR || 'uploads';
-  const dir  = join(base, 'avatars');
+  const dir = join(base, 'avatars');
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -34,23 +34,25 @@ function avatarsDir() {
 // ── Character serialiser ──────────────────────────────────────────────────────
 function serializeChar(row, missionCount = 0) {
   return {
-    id:            row.id,
+    id: row.id,
     foundryActorId: row.foundry_actor_id,
-    name:          row.name,
-    level:         row.level,
-    xp:            row.xp,
-    xpNext:        row.xp_next,
-    tokenImg:      row.token_img,
-    portraitImg:   row.portrait_img,
-    biography:     row.biography,
-    system:        row.system,
-    active:        row.active,
-    retired:       row.retired,
-    retiredAt:     row.retired_at,
-    lastSyncedAt:  row.last_synced_at,
+    name: row.name,
+    level: row.level,
+    xp: row.xp,
+    xpNext: row.xp_next,
+    tokenImg: row.token_img,
+    portraitImg: row.portrait_img,
+    biography: row.biography,
+    system: row.system,
+    active: row.active,
+    retired: row.retired,
+    retiredAt: row.retired_at,
+    lastSyncedAt: row.last_synced_at,
     missionCount,
     missionsCount: missionCount,
-    userId:        row.user_id,
+    userId: row.user_id,
+    classe: row.classe,
+    race: row.race,
   };
 }
 
@@ -62,10 +64,10 @@ async function uploadAvatar(req, reply) {
     return reply.code(400).send({ error: 'Only JPEG, PNG, WebP and GIF images are allowed' });
   }
 
-  const ext      = extname(data.filename) || '.jpg';
+  const ext = extname(data.filename) || '.jpg';
   const filename = `${req.user.id}-${randomUUID()}${ext}`;
-  const dir      = avatarsDir();
-  const dest     = join(dir, filename);
+  const dir = avatarsDir();
+  const dest = join(dir, filename);
 
   try {
     await pipeline(data.file, createWriteStream(dest));
@@ -95,7 +97,7 @@ async function getMissionCounts(userId) {
     [userId],
   );
   return {
-    totalMissions:  Number(res.rows[0]?.total  ?? 0),
+    totalMissions: Number(res.rows[0]?.total ?? 0),
     activeMissions: Number(res.rows[0]?.active ?? 0),
   };
 }
@@ -133,11 +135,11 @@ export async function profileRoutes(fastify) {
 
     return {
       user: {
-        id:          u.id,
+        id: u.id,
         displayName: u.display_name,
-        role:        u.role,
-        avatarUrl:   u.avatar_url ?? null,
-        createdAt:    u.created_at,
+        role: u.role,
+        avatarUrl: u.avatar_url ?? null,
+        createdAt: u.created_at,
       },
       characters: charRes.rows.map(r => serializeChar(r, charMissionCounts[r.id] ?? 0)),
       stats,
@@ -161,13 +163,13 @@ export async function profileRoutes(fastify) {
       body: {
         type: 'object', required: ['name'],
         properties: {
-          name:       { type: 'string', minLength: 1, maxLength: 100 },
-          level:      { type: 'integer', minimum: 1, maximum: 20 },
-          xp:         { type: 'integer', minimum: 0 },
-          xpNext:     { type: 'integer', minimum: 1 },
-          tokenImg:   { type: 'string' },
-          portraitImg:{ type: 'string' },
-          biography:  { type: 'string' },
+          name: { type: 'string', minLength: 1, maxLength: 100 },
+          level: { type: 'integer', minimum: 1, maximum: 20 },
+          xp: { type: 'integer', minimum: 0 },
+          xpNext: { type: 'integer', minimum: 1 },
+          tokenImg: { type: 'string' },
+          portraitImg: { type: 'string' },
+          biography: { type: 'string' },
         },
       },
     },
@@ -191,7 +193,7 @@ export async function profileRoutes(fastify) {
   // Owner: can only edit own character's biography/portrait (not level/xp).
   fastify.patch('/players/:userId/characters/:id', async (req, reply) => {
     const { userId, id } = req.params;
-    const isGM    = req.user.role === 'GM';
+    const isGM = req.user.role === 'GM' || req.user.role === 'GM_PRINCIPAL';
     const isOwner = req.user.id === userId;
 
     if (!isGM && !isOwner) return reply.code(403).send({ error: 'Forbidden' });
@@ -200,19 +202,19 @@ export async function profileRoutes(fastify) {
     if (!existing.rows.length) return reply.code(404).send({ error: 'Character not found' });
 
     const updates = [];
-    const values  = [];
+    const values = [];
 
     const set = (col, val) => { values.push(val); updates.push(`${col} = $${values.length}`); };
 
     if (isGM) {
       // GM can change anything
-      if (req.body.userId    !== undefined) set('user_id', req.body.userId);
-      if (req.body.level     !== undefined) set('level', req.body.level);
-      if (req.body.xp        !== undefined) set('xp', req.body.xp);
-      if (req.body.xpNext    !== undefined) set('xp_next', req.body.xpNext);
-      if (req.body.name      !== undefined) set('name', req.body.name.trim());
-      if (req.body.active    !== undefined) set('active', req.body.active);
-      if (req.body.retired   !== undefined) {
+      if (req.body.userId !== undefined) set('user_id', req.body.userId);
+      if (req.body.level !== undefined) set('level', req.body.level);
+      if (req.body.xp !== undefined) set('xp', req.body.xp);
+      if (req.body.xpNext !== undefined) set('xp_next', req.body.xpNext);
+      if (req.body.name !== undefined) set('name', req.body.name.trim());
+      if (req.body.active !== undefined) set('active', req.body.active);
+      if (req.body.retired !== undefined) {
         set('retired', req.body.retired);
         if (req.body.retired) set('retired_at', new Date().toISOString());
       }
@@ -220,7 +222,7 @@ export async function profileRoutes(fastify) {
 
     // Owner (and GM) can update portrait/biography
     if (req.body.portraitImg !== undefined) set('portrait_img', req.body.portraitImg);
-    if (req.body.biography   !== undefined) set('biography', req.body.biography);
+    if (req.body.biography !== undefined) set('biography', req.body.biography);
 
     if (!updates.length) return reply.code(400).send({ error: 'Nothing to update' });
 
@@ -288,10 +290,10 @@ export async function profileRoutes(fastify) {
       return reply.code(400).send({ error: 'Only JPEG, PNG, WebP and GIF images are allowed' });
     }
 
-    const ext      = extname(data.filename) || '.jpg';
+    const ext = extname(data.filename) || '.jpg';
     const filename = `${req.user.id}-${randomUUID()}${ext}`;
-    const dir      = avatarsDir();
-    const dest     = join(dir, filename);
+    const dir = avatarsDir();
+    const dest = join(dir, filename);
 
     let bytes = 0;
     try {
@@ -307,7 +309,7 @@ export async function profileRoutes(fastify) {
 
     if (bytes > MAX_AVATAR_BYTES) {
       // File too large — still saved, remove it
-      import('fs').then(fs => fs.unlinkSync(dest)).catch(() => {});
+      import('fs').then(fs => fs.unlinkSync(dest)).catch(() => { });
       return reply.code(413).send({ error: 'Image exceeds 4 MB limit' });
     }
 
@@ -322,4 +324,102 @@ export async function profileRoutes(fastify) {
   });
 
   fastify.patch('/me/avatar', uploadAvatar);
+
+  // ── GET /me/characters ─────────────────────────────────────────────────────
+  fastify.get('/me/characters', async (req, reply) => {
+    const res = await query(
+      `SELECT *
+      FROM player_characters
+      WHERE user_id = $1
+      AND retired = FALSE
+      ORDER BY active DESC, updated_at DESC`,
+      [req.user.id]
+    );
+    return res.rows.map(r => serializeChar(r));
+  });
+
+  // ── GET /me/characters/available ───────────────────────────────────────────
+  fastify.get('/me/characters/available', async (req, reply) => {
+    const res = await query(
+      `SELECT pc.*, COALESCE(u.display_name, u.name) AS user_display_name
+       FROM player_characters pc
+       LEFT JOIN users u ON u.id = pc.user_id
+       WHERE pc.active = TRUE AND pc.retired = FALSE AND pc.dead = FALSE
+         AND (pc.user_id IS NULL OR pc.user_id = $1)
+       ORDER BY pc.name ASC`,
+      [req.user.id]
+    );
+    return res.rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      level: r.level,
+      tokenImg: r.token_img,
+      isLinked: r.user_id === req.user.id,
+      userId: r.user_id,
+      userDisplayName: r.user_display_name || null,
+    }));
+  });
+
+  // ── POST /me/characters/:id/link ───────────────────────────────────────────
+  fastify.post('/me/characters/:id/link', async (req, reply) => {
+    const { id } = req.params;
+
+    const charRes = await query('SELECT * FROM player_characters WHERE id = $1', [id]);
+    if (!charRes.rows.length) {
+      return reply.code(404).send({ error: 'Personagem não encontrado' });
+    }
+
+    const char = charRes.rows[0];
+    if (!char.active) {
+      return reply.code(400).send({ error: 'Personagem está inativo' });
+    }
+    if (char.retired) {
+      return reply.code(400).send({ error: 'Personagem está aposentado' });
+    }
+    if (char.dead) {
+      return reply.code(400).send({ error: 'Personagem está morto' });
+    }
+    if (char.user_id && char.user_id !== req.user.id) {
+      return reply.code(400).send({ error: 'Personagem já está vinculado a outro jogador' });
+    }
+
+    const res = await query(
+      `UPDATE player_characters 
+       SET user_id = $1, updated_at = NOW() 
+       WHERE id = $2 
+       RETURNING *`,
+      [req.user.id, id]
+    );
+
+    const updatedChar = serializeChar(res.rows[0]);
+    broadcast('CHARACTER_UPDATED', { userId: req.user.id, character: updatedChar });
+    return updatedChar;
+  });
+
+  // ── DELETE /me/characters/:id/link ─────────────────────────────────────────
+  fastify.delete('/me/characters/:id/link', async (req, reply) => {
+    const { id } = req.params;
+
+    const charRes = await query('SELECT * FROM player_characters WHERE id = $1', [id]);
+    if (!charRes.rows.length) {
+      return reply.code(404).send({ error: 'Personagem não encontrado' });
+    }
+
+    const char = charRes.rows[0];
+    if (char.user_id !== req.user.id) {
+      return reply.code(403).send({ error: 'Você não tem permissão para desvincular este personagem' });
+    }
+
+    const res = await query(
+      `UPDATE player_characters 
+       SET user_id = NULL, updated_at = NOW() 
+       WHERE id = $1 
+       RETURNING *`,
+      [id]
+    );
+
+    const updatedChar = serializeChar(res.rows[0]);
+    broadcast('CHARACTER_UPDATED', { userId: req.user.id, character: updatedChar });
+    return updatedChar;
+  });
 }
