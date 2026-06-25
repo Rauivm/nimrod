@@ -1,0 +1,20 @@
+{
+  "NS": {
+    "Settings": {
+      "SyncEnabled":         "Sync enabled",
+      "SyncEnabledHint":     "Sends resource events to the Nimrod session log panel.",
+      "NimrodUrl":           "Nimrod URL",
+      "NimrodUrlHint":       "Base URL of your Nimrod site (e.g. https://nimrod.mysite.com). No trailing slash.",
+      "NimrodToken":         "Auth token",
+      "NimrodTokenHint":     "JWT token of the GM Principal. Copy from the Nimrod panel → Settings → API Token.",
+      "ActiveSessionId":     "Active session ID",
+      "ActiveSessionIdHint": "UUID of the session open in the Nimrod panel. Copy when opening a session. Changing this value clears the sent-event cache.",
+      "OnlyPlayerOwned":     "Only player-owned characters",
+      "OnlyPlayerOwnedHint": "Ignores NPCs and tokens with no owner. Recommended to keep enabled.",
+      "TrackHp":             "Track HP changes",
+      "TrackHpHint":         "Logs HP gain and loss. May generate many events during combat.",
+      "TrackItems":          "Track items (acquired/removed)",
+      "TrackItemsHint":      "Logs when an item is added to or removed from a character's inventory."
+    }
+  }
+}

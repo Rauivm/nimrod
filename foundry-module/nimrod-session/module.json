@@ -1,0 +1,43 @@
+{
+  "id": "nimrod-session",
+  "title": "Nimrod Session — Resource Log",
+  "description": "Rastreia eventos de recursos por jogador (ouro, XP, poções, espaços de magia, itens, HP) e os envia automaticamente para o painel de sessões do Nimrod. Requer uma sessão aberta no site Nimrod.",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14"
+  },
+  "authors": [
+    {
+      "name": "Raui",
+      "email": "rviana.macedo@gmail.com"
+    }
+  ],
+  "esmodules": [
+    "scripts/main.js"
+  ],
+  "languages": [
+    {
+      "lang": "pt-BR",
+      "name": "Português (Brasil)",
+      "path": "lang/pt-BR.json"
+    },
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    }
+  ],
+  "relationships": {
+    "systems": [
+      {
+        "id": "dnd5e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "3.0.0"
+        }
+      }
+    ]
+  },
+  "flags": {}
+}

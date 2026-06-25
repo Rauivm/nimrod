@@ -9,6 +9,7 @@ import CemeteryPage from './pages/CemeteryPage.jsx';
 import MapsPage from './pages/MapsPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
 import PatchNotesPage from './pages/PatchNotesPage.jsx';
+import SessionsPage from './pages/SessionsPage.jsx';
 
 import SplashScreen from './components/SplashScreen.jsx';
 import LgpdConsentModal from './components/LgpdConsentModal.jsx';
@@ -158,6 +159,7 @@ export default function App() {
               path="patch-notes"
               element={<PatchNotesPage />}
             />
+            <Route path="gm/sessions" element={<SessionsPage />} />
           </Route>
         </Routes>
       )}

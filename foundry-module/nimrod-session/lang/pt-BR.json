@@ -1,0 +1,20 @@
+{
+  "NS": {
+    "Settings": {
+      "SyncEnabled":         "Sincronização ativa",
+      "SyncEnabledHint":     "Envia eventos de recursos para o painel de sessões do Nimrod.",
+      "NimrodUrl":           "URL do Nimrod",
+      "NimrodUrlHint":       "URL base do seu site Nimrod (ex: https://nimrod.meusite.com). Sem barra no final.",
+      "NimrodToken":         "Token de autenticação",
+      "NimrodTokenHint":     "Token JWT do GM Principal. Copie do painel Nimrod → Configurações → Token de API.",
+      "ActiveSessionId":     "ID da sessão ativa",
+      "ActiveSessionIdHint": "UUID da sessão aberta no painel Nimrod. Copie ao abrir uma sessão. Trocar este valor limpa o cache de eventos enviados.",
+      "OnlyPlayerOwned":     "Apenas personagens de jogadores",
+      "OnlyPlayerOwnedHint": "Ignora NPCs e tokens sem dono. Recomendado manter ativo.",
+      "TrackHp":             "Rastrear mudanças de HP",
+      "TrackHpHint":         "Registra ganho e perda de HP no log. Pode gerar muitos eventos em combate.",
+      "TrackItems":          "Rastrear itens (adquiridos/removidos)",
+      "TrackItemsHint":      "Registra quando um item é adicionado ou removido do inventário de um personagem."
+    }
+  }
+}

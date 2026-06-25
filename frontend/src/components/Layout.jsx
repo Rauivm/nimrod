@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useAuth, roleLabel } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
 import { api } from '../lib/api.js';
-import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil, UserCircle } from 'lucide-react';
+import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil, UserCircle, BookOpen } from 'lucide-react';
 import EditDisplayNameModal from './EditDisplayNameModal.jsx';
 
 function FoundryButton({ user }) {
@@ -87,6 +87,11 @@ export default function Layout() {
               to="/patch-notes" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
               Atualizações
             </NavLink>
+            {(user?.role === 'GM' || user?.role === 'GM_PRINCIPAL') && (
+              <NavLink to="/gm/sessions" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
+                <BookOpen size={14} /><span>Sessões</span>
+              </NavLink>
+            )}
           </nav>
 
           <div className="header-right">

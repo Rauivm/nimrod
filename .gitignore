@@ -5,3 +5,7 @@ node_modules/
 .env.example
 .dockerignore
 docker-compose.yml
+
+# Dev local — nunca commitar
+dev_setup_users.sh
+.env

@@ -3,3 +3,4 @@ node_modules/
 uploads/
 *.log
 .dockerignore
+dev_seed_users.sql
