@@ -4,6 +4,7 @@ import { join, extname } from 'path';
 import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 import { assertRateLimit } from '../middleware/rateLimit.js';
+import { isGM, isGMPrincipal, isAdmin, requireGM, requireGMPrincipal, requireAdmin } from '../lib/roles.js';
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
 mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -26,7 +27,7 @@ export async function mapRoutes(fastify) {
   // POST /maps (GM only)
   fastify.post('/maps', async (req, reply) => {
     if (!assertRateLimit(req, reply, 'maps:upload', { limit: 8, windowMs: 60_000 })) return reply;
-    if (req.user.role !== 'GM') {
+    if (!isGM(req.user)) {
       return reply.code(403).send({ error: 'GM only' });
     }
 
@@ -53,7 +54,7 @@ export async function mapRoutes(fastify) {
 
   // DELETE /maps/:id (GM only)
   fastify.delete('/maps/:id', async (req, reply) => {
-    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
+    if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
     const res = await query(
       'DELETE FROM maps WHERE id = $1 RETURNING id',
       [req.params.id]

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { useAuth, roleLabel } from '../contexts/AuthContext.jsx';
+import { useAuth, roleLabel, isGM } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
 import CharacterCard from '../components/CharacterCard.jsx';
 import LinkCharacterModal from '../components/LinkCharacterModal.jsx';
@@ -132,8 +132,8 @@ export default function ProfilePage() {
 
   const targetId = userId ?? me?.id;
   const isOwn    = targetId === me?.id;
-  const isGM     = me?.role === 'GM';
-  const isPlayer = me?.role === 'PLAYER';
+  const currentUserIsGM     = isGM(me);
+  const currentUserCanSelfLink = Boolean(me) && !currentUserIsGM;
 
   const [profile, setProfile]       = useState(null);
   const [loading, setLoading]       = useState(true);
@@ -150,7 +150,7 @@ export default function ProfilePage() {
   const [linkingId, setLinkingId]             = useState(null);
 
   const loadAvailableChars = useCallback(async () => {
-    if (!isOwn || isGM) return;
+    if (!isOwn || isGM(me)) return;
     setLoadingAvail(true);
     try {
       const data = await api.get('/me/characters/available');
@@ -159,7 +159,7 @@ export default function ProfilePage() {
       setAvailableChars([]);
     }
     setLoadingAvail(false);
-  }, [isOwn, isGM]);
+  }, [isOwn, currentUserIsGM ]);
 
   const loadProfile = useCallback(async () => {
     if (!targetId) return;
@@ -271,7 +271,7 @@ export default function ProfilePage() {
         <div className="profile-identity">
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <h1 className="profile-name">{user.displayName}</h1>
-            {user.role === 'GM'
+            {isGM(user)
               ? <span className="gm-badge">GM — Mestre</span>
               : <span className="player-badge">Jogador</span>
             }
@@ -283,7 +283,7 @@ export default function ProfilePage() {
         </div>
 
         {/* GM tools */}
-        {isGM && (
+        {currentUserIsGM  && (
           <div className="profile-gm-tools">
             <button
               className="gm-tool-btn"
@@ -314,7 +314,7 @@ export default function ProfilePage() {
       <section className="profile-section">
         <div className="profile-section-header">
           <h2 className="profile-section-title">⚔ Personagens Ativos</h2>
-          {isGM && (
+          {currentUserIsGM  && (
             <button className="add-char-btn" onClick={() => setShowLinkModal(true)}>
               <Plus size={12} /> Adicionar
             </button>
@@ -324,7 +324,7 @@ export default function ProfilePage() {
         {activeChars.length === 0 ? (
           <div className="empty-state">
             <span>Nenhum personagem ativo.</span>
-            {isGM && (
+            {currentUserIsGM  && (
               <span style={{ fontSize: '13px', color: 'var(--text-faint)' }}>
                 Sincronize com o Foundry ou adicione manualmente.
               </span>
@@ -337,7 +337,7 @@ export default function ProfilePage() {
                 key={char.id}
                 character={char}
                 isOwn={isOwn}
-                isGM={isGM}
+                isGM={currentUserIsGM}
                 onUpdate={loadProfile}
               />
             ))}
@@ -363,7 +363,7 @@ export default function ProfilePage() {
                   key={char.id}
                   character={char}
                   isOwn={isOwn}
-                  isGM={isGM}
+                  isGM={currentUserIsGM}
                   onUpdate={loadProfile}
                 />
               ))}
@@ -373,7 +373,7 @@ export default function ProfilePage() {
       )}
 
       {/* ── Player: self-link characters ──────────────────────────────────── */}
-      {isOwn && isPlayer && (
+      {isOwn && currentUserCanSelfLink && (
         <section className="profile-section">
           <div className="profile-section-header">
             <h2 className="profile-section-title">

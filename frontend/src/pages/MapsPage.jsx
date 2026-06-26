@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../lib/api.js';
-import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAuth, isGM, isGMPrincipal, roleLabel } from '../contexts/AuthContext.jsx';
 import { Upload, Download, Trash2, Map } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -53,7 +53,7 @@ export default function MapsPage() {
     } catch (e) { alert(e.message); }
   };
 
-  const isGM = user?.role === 'GM';
+  const currentUserIsGM = isGM(user);
 
   return (
     <div className="maps-page">
@@ -61,7 +61,7 @@ export default function MapsPage() {
         <h1 className="page-title">🗺 Mapas</h1>
       </div>
 
-      {isGM && (
+      {currentUserIsGM && (
         <div className="upload-section">
           <h2 className="section-title">Enviar Mapa</h2>
           <form onSubmit={upload} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -109,7 +109,7 @@ export default function MapsPage() {
                 <a href={m.file_url} download={m.file_name} className="download-btn" title="Baixar">
                   <Download size={14} />
                 </a>
-                {isGM && (
+                {currentUserIsGM && (
                   <button onClick={() => del(m.id)} className="map-delete-btn">
                     <Trash2 size={13} />
                   </button>

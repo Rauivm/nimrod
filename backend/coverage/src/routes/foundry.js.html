@@ -641,7 +641,7 @@
 <span class="cstat-no" title="statement not covered" >      actorName: mapping.actor_name,</span>
 <span class="cstat-no" title="statement not covered" >    });</span>
 <span class="cstat-no" title="statement not covered" ></span>
-<span class="cstat-no" title="statement not covered" >    return { url: `${foundryBaseUrl}/nimrod-login?token=${encodeURIComponent(token)}` };</span>
+<span class="cstat-no" title="statement not covered" >    return { url: buildFoundryLaunchUrl(foundryBaseUrl, token) };</span>
 <span class="cstat-no" title="statement not covered" >  });</span>
 <span class="cstat-no" title="statement not covered" ></span>
 <span class="cstat-no" title="statement not covered" >  // ── POST /nimrod/verify ────────────────────────────────────────────────────</span>

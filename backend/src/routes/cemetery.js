@@ -4,6 +4,7 @@ import { join, extname } from 'path';
 import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 import { assertRateLimit } from '../middleware/rateLimit.js';
+import { isGM, isGMPrincipal, isAdmin, requireGM, requireGMPrincipal, requireAdmin } from '../lib/roles.js';
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
 mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -296,8 +297,8 @@ export async function cemeteryCharacterRoutes(fastify) {
     if (!char.rows.length) return reply.code(404).send({ error: 'Character not found' });
 
     const isOwner = char.rows[0].user_id === req.user.id;
-    const isGM    = req.user.role === 'GM' || req.user.role === 'GM_PRINCIPAL';;
-    if (!isOwner && !isGM) return reply.code(403).send({ error: 'Forbidden' });
+    const currentUserIsGM = isGM(req.user);
+    if (!isOwner && !currentUserIsGM) return reply.code(403).send({ error: 'Forbidden' });
 
     const data = await req.file();
     if (!data) return reply.code(400).send({ error: 'No file' });

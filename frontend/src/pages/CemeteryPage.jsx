@@ -3,7 +3,7 @@ import {
 } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAuth, isGM, isGMPrincipal, roleLabel } from '../contexts/AuthContext.jsx';
 import { Flower, Plus, Trash2, X, Skull, Archive, Star, Trophy, Upload } from 'lucide-react';
 
 // ── Tribute tier ──────────────────────────────────────────────────────────────
@@ -191,7 +191,7 @@ const LegacyCharCard = memo(function LegacyCharCard({ char, onUpdate }) {
     catch (e) { alert(e.message); }
   };
 
-  const canDelete = char.owner_id === user?.id || user?.role === 'GM';
+  const canDelete = char.owner_id === user?.id || isGM(user);
 
   return (
     <div className="cem-card cem-card-legacy animate-in">

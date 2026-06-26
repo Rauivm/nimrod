@@ -35,6 +35,7 @@ import { startCemeteryDecay } from './jobs/cemeteryDecay.js';
 import { startFoundryActorSyncJob } from './services/foundrySync.js';
 import { patchNoteRoutes } from './routes/patchNotes.js';
 import { sessionRoutes } from './routes/sessions.js';
+import { arcRoutes }     from './routes/arcs.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
@@ -106,6 +107,9 @@ fastify.addHook('onRequest', async (req, reply) => {
     path === '/config'              ||
     path === '/ws'                  ||
     path.startsWith('/uploads/')    ||
+    path === '/nimrod/verify'       ||
+    path === '/nimrod/session/enter' ||
+    path === '/nimrod/session/leave' ||
     path === '/foundry/push-actors'   // autenticado por X-Nimrod-Key na rota
   ) return;
 
@@ -123,6 +127,7 @@ await fastify.register(mapRoutes);
 await fastify.register(foundryRoutes);
 await fastify.register(profileRoutes);
 await fastify.register(sessionRoutes);
+await fastify.register(arcRoutes);
 await fastify.register(patchNoteRoutes);
 
 // ── Start ─────────────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWs } from '../contexts/WsContext.jsx';
 import { api } from '../lib/api.js';
-import { useAuth, roleLabel } from '../contexts/AuthContext.jsx';
+import { useAuth, roleLabel, isGM, isGMPrincipal } from '../contexts/AuthContext.jsx';
 import { Crown, ChevronDown, Link } from 'lucide-react';
 import LinkCharacterModal from './LinkCharacterModal.jsx';
 
@@ -9,10 +9,10 @@ function PlayerAvatar({ name, role }) {
   // Support both `displayName` (new) and `name` (legacy) field names.
   const displayName = name;
   const initial = displayName?.[0]?.toUpperCase() ?? '?';
-  const isGM = role === 'GM';
+  const playerIsGM = isGM({ role });
   return (
     <div className="op-avatar" style={{
-      background: isGM
+      background: playerIsGM
         ? 'linear-gradient(135deg, #8b2020, #c9a84c)'
         : 'linear-gradient(135deg, #2a3a6a, #4a5a8a)',
     }}>
@@ -53,13 +53,13 @@ function RoleMenu({ player, onPromoted }) {
       {open && (
         <div className="role-menu-dropdown">
           <button
-            className={`role-menu-item ${player.role === 'GM' ? 'role-menu-active' : ''}`}
+            className={`role-menu-item ${isGM(player) ? 'role-menu-active' : ''}`}
             onClick={() => setRole('GM')}
           >
             Mestre (GM)
           </button>
           <button
-            className={`role-menu-item ${player.role === 'PLAYER' ? 'role-menu-active' : ''}`}
+            className={`role-menu-item ${!isGM(player) ? 'role-menu-active' : ''}`}
             onClick={() => setRole('PLAYER')}
           >
             Jogador
@@ -95,7 +95,7 @@ export function OnlinePlayersPanel() {
     return () => { u1(); u2(); };
   }, [on, fetchOnline]);
 
-  const isGM = user?.role === 'GM';
+  const currentUserIsGM = isGM(user);
 
   return (
     <aside className="op-panel">
@@ -127,11 +127,11 @@ export function OnlinePlayersPanel() {
                     {isMe ? ' (você)' : ''}
                   </span>
                   <span className="op-role-label">{roleLabel(p.role)}</span>
-                  {p.role === 'GM' && <span className="op-gm-badge">GM</span>}
+                  {isGM(p) && <span className="op-gm-badge">GM</span>}
                 </div>
 
                 {/* GM can change any player's role, including themselves */}
-                {isGM && (
+                {currentUserIsGM && (
                   <div className="op-gm-actions">
                     <button
                       className="link-char-trigger"

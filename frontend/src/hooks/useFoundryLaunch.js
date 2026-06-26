@@ -15,12 +15,13 @@ export function useFoundryLaunch() {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
 
-  const launch = useCallback(async () => {
+  const launch = useCallback(async (options = {}) => {
     setLoading(true);
     setError(null);
 
     try {
-      const data = await api.get('/foundry/launch');
+      const sessionId = options.sessionId ? `?sessionId=${encodeURIComponent(options.sessionId)}` : '';
+      const data = await api.get(`/foundry/launch${sessionId}`);
       window.open(data.url, '_blank', 'noopener,noreferrer');
     } catch (err) {
       setError(err.message ?? 'Could not launch Foundry.');

@@ -3,7 +3,7 @@ import { ptBR } from 'date-fns/locale';
 import { Heart, Trash2, MessageSquare, CornerDownRight, ChevronDown, ChevronUp } from 'lucide-react';
 import { memo, useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api.js';
-import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAuth, isGM, isGMPrincipal, roleLabel } from '../contexts/AuthContext.jsx';
 
 const MAX_VISIBLE_DEPTH = 3;
 
@@ -14,7 +14,7 @@ const MAX_VISIBLE_DEPTH = 3;
 function PostAvatar({ author }) {
   const [imgErrored, setImgErrored] = useState(false);
 
-  const isGM      = author?.role === 'GM';
+  const authorIsGM      = isGM(author);
   const hasChar   = Boolean(author?.characterName);
   const rawSrc    = author?.characterTokenImg ?? null;
 
@@ -33,7 +33,7 @@ function PostAvatar({ author }) {
     ? author.characterName[0]?.toUpperCase() ?? '?'
     : (author?.displayName || 'A')[0]?.toUpperCase() ?? '?';
 
-  const fallbackBg = isGM
+  const fallbackBg = authorIsGM
     ? 'linear-gradient(135deg, #8b2020, #c9a84c)'
     : 'linear-gradient(135deg, #2a3060, #4a5090)';
 
@@ -60,7 +60,7 @@ function PostAvatar({ author }) {
 //        [inicial] Nome do Jogador               (sem personagem — legado)
 function AuthorChip({ author }) {
   const playerName = author?.displayName || 'Aventureiro';
-  const isGM       = author?.role === 'GM';
+  const authorIsGM       = isGM(author);
   const hasChar    = Boolean(author?.characterName);
 
   return (
@@ -73,7 +73,7 @@ function AuthorChip({ author }) {
             <div className="post-author-char-row">
               <span className="post-char-name">{author.characterName}</span>
               <span className="post-char-level">Lv {author.characterLevel}</span>
-              {isGM && <span className="gm-badge-sm">GM</span>}
+              {authorIsGM && <span className="gm-badge-sm">GM</span>}
             </div>
             <div className="post-author-player-row">
               <span className="post-author-by">por </span>
@@ -83,7 +83,7 @@ function AuthorChip({ author }) {
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span className="post-author-name">{playerName}</span>
-            {isGM
+            {authorIsGM
               ? <span className="gm-badge-sm">GM</span>
               : <span className="role-badge-sm">Jogador</span>
             }

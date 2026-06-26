@@ -1,6 +1,7 @@
 import { query } from '../db/index.js';
 import { getOnlineUserIds, broadcast } from '../ws/broadcast.js';
-import { pickFallbackName, isGM } from '../middleware/auth.js';
+import { pickFallbackName } from '../middleware/auth.js';
+import { isGM, isGMPrincipal, isAdmin, requireGM, requireGMPrincipal, requireAdmin } from '../lib/roles.js';
 
 export async function userRoutes(fastify) {
 
@@ -75,10 +76,46 @@ export async function userRoutes(fastify) {
     const res = await query(
       `SELECT id,
               COALESCE(display_name, name) AS "displayName",
-              role
+              role,
+              avatar_url
        FROM users ORDER BY display_name NULLS LAST`,
     );
-    return res.rows;
+
+    const charRes = await query(
+      `SELECT id,
+              user_id,
+              name,
+              level,
+              token_img,
+              portrait_img
+       FROM player_characters
+       WHERE user_id IS NOT NULL
+         AND active = TRUE
+         AND retired = FALSE
+         AND dead = FALSE
+       ORDER BY name ASC`,
+    );
+
+    const charsByUser = new Map();
+    for (const ch of charRes.rows) {
+      const list = charsByUser.get(ch.user_id) ?? [];
+      list.push({
+        id:          ch.id,
+        name:        ch.name,
+        level:       ch.level,
+        tokenImg:    ch.token_img,
+        portraitImg: ch.portrait_img,
+      });
+      charsByUser.set(ch.user_id, list);
+    }
+
+    return res.rows.map(u => ({
+      id:          u.id,
+      displayName: u.displayName,
+      role:        u.role,
+      avatarUrl:   u.avatar_url ?? null,
+      characters:  charsByUser.get(u.id) ?? [],
+    }));
   });
 
   // ── GET /online-users ──────────────────────────────────────────────────────
@@ -95,16 +132,23 @@ export async function userRoutes(fastify) {
     return res.rows;
   });
 
-  // ── PATCH /users/:id/role (GM only) ───────────────────────────────────────
+  // ── PATCH /users/:id/role (GM_PRINCIPAL only) ─────────────────────────────
+  // GM_PRINCIPAL pode atribuir qualquer role. GM comum pode promover a GM mas
+  // não pode criar outro GM_PRINCIPAL.
   fastify.patch('/users/:id/role', {
     schema: {
       body: {
         type: 'object', required: ['role'],
-        properties: { role: { type: 'string', enum: ['PLAYER', 'GM'] } },
+        properties: { role: { type: 'string', enum: ['PLAYER', 'GM', 'GM_PRINCIPAL'] } },
       },
     },
   }, async (req, reply) => {
-    if (!isGM(req.user.role)) return reply.code(403).send({ error: 'GM only' });
+    if (!isGM(req.user)) return reply.code(403).send({ error: 'Apenas GMs podem alterar roles.' });
+
+    // Apenas GM_PRINCIPAL pode conceder GM_PRINCIPAL
+    if (req.body.role === 'GM_PRINCIPAL' && !isGMPrincipal(req.user)) {
+      return reply.code(403).send({ error: 'Apenas o GM Principal pode conceder este nível de acesso.' });
+    }
 
     const res = await query(
       'UPDATE users SET role = $1 WHERE id = $2 RETURNING *',
@@ -128,11 +172,11 @@ export async function configRoutes(fastify) {
 // Single place that decides what /me returns — never exposes raw email.
 function serializeMe(u) {
   return {
-    id: u.id,
-    email: maskEmail(u.email),
-    role: u.role,
+    id:          u.id,
+    email:       maskEmail(u.email),
+    role:        u.role,
     displayName: u.display_name ?? null,   // null = needs first-login modal
-    avatarUrl: u.avatar_url ?? null,
+    avatarUrl:    u.avatar_url ?? null,
     lgpdConsent: u.lgpd_consent ?? true, // default to true for legacy users --- IGNORE ---
   };
 }

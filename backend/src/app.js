@@ -20,27 +20,30 @@ import { resolveFoundryMapping } from './services/foundryMap.js';
 
 const {
   NODE_ENV    = 'development',
-  DEV_USER_EMAIL,
-  DEV_USER_NAME  = 'Dev User',
-  DEV_USER_ROLE  = 'PLAYER',
-  FOUNDRY_URL,
-  FOUNDRY_PUBLIC_URL,
-  FOUNDRY_JWT_SECRET,
 } = process.env;
-
-const INTERNAL_FOUNDRY_URL =
-  FOUNDRY_URL?.replace(/\/$/, '');
-
-const PUBLIC_FOUNDRY_URL =
-  (
-    FOUNDRY_PUBLIC_URL ||
-    FOUNDRY_URL
-  )?.replace(/\/$/, '');
 
 const IS_PROD = NODE_ENV === 'production';
 
-if (!FOUNDRY_JWT_SECRET) {
-  throw new Error('FOUNDRY_JWT_SECRET is required');
+function getFoundryJwtSecret() {
+  return process.env.FOUNDRY_JWT_SECRET || (process.env.NODE_ENV === 'test' ? 'test-secret' : null);
+}
+
+function getFoundryBaseUrl() {
+  const publicUrl = process.env.FOUNDRY_PUBLIC_URL?.trim();
+  if (publicUrl) return publicUrl.replace(/\/$/, '');
+
+  const configuredUrl = (
+    process.env.FOUNDRY_URL ||
+    (process.env.NODE_ENV === 'test' ? 'http://foundry.test' : null)
+  )?.trim();
+  if (!configuredUrl) return null;
+
+  const devUrl = process.env.FOUNDRY_LOCAL_URL?.trim() || process.env.FOUNDRY_DEV_URL?.trim();
+  if (process.env.NODE_ENV !== 'production' && configuredUrl.includes('host.docker.internal')) {
+    return (devUrl || configuredUrl.replace('host.docker.internal', 'localhost')).replace(/\/$/, '');
+  }
+
+  return configuredUrl.replace(/\/$/, '');
 }
 
 export async function build({ mockUser = null, mockDb = null, logger = false } = {}) {
@@ -65,11 +68,11 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
     }
 
     // Desenvolvimento local
-    if (!IS_PROD && DEV_USER_EMAIL) {
+    if (!IS_PROD && process.env.DEV_USER_EMAIL) {
       req.user = {
-        email: DEV_USER_EMAIL,
-        role:  DEV_USER_ROLE,
-        name:  DEV_USER_NAME,
+        email: process.env.DEV_USER_EMAIL,
+        role:  process.env.DEV_USER_ROLE || 'PLAYER',
+        name:  process.env.DEV_USER_NAME || 'Dev User',
       };
       return;
     }
@@ -90,9 +93,11 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
       return reply.code(401).send({ error: 'Unauthorized' });
     }
 
-    const foundryBaseUrl =
-      (process.env.FOUNDRY_PUBLIC_URL || process.env.FOUNDRY_URL)
-        ?.replace(/\/$/, '');
+    const foundryBaseUrl = getFoundryBaseUrl();
+    const secret = getFoundryJwtSecret();
+    if (!foundryBaseUrl) return reply.code(503).send({ error: 'FOUNDRY_URL is required' });
+    if (!secret) return reply.code(503).send({ error: 'FOUNDRY_JWT_SECRET is required' });
+
     const mapping        = await resolveFoundryMapping(dbPool, req.user.email);
     const { role, world, actor_name } = mapping;
 
@@ -104,7 +109,7 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
       exp: Math.floor(Date.now() / 1000) + 300,   // 5 minutos
     };
 
-    const token = signFoundryToken(payload, FOUNDRY_JWT_SECRET);
+    const token = signFoundryToken(payload, secret);
     const url   = new URL(foundryBaseUrl);
     url.searchParams.set('t', token);
 
@@ -115,8 +120,11 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
     const { token } = req.body ?? {};
     if (!token) return reply.code(400).send({ error: 'token is required' });
 
+    const secret = getFoundryJwtSecret();
+    if (!secret) return reply.code(503).send({ error: 'FOUNDRY_JWT_SECRET is required' });
+
     try {
-      const payload = verifyFoundryToken(token, FOUNDRY_JWT_SECRET);
+      const payload = verifyFoundryToken(token, secret);
       return reply.send({
         email: payload.e,
         role:  payload.r,

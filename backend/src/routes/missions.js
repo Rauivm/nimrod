@@ -2,6 +2,7 @@ import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
 import { notifyMissionCreated, notifyNoticeCreated } from '../services/notifier/notifier.js';
 import { assertRateLimit } from '../middleware/rateLimit.js';
+import { isGM, isGMPrincipal, isAdmin, requireGM, requireGMPrincipal, requireAdmin } from '../lib/roles.js';
 
 function currentDateValue() {
   const now = new Date();
@@ -67,7 +68,124 @@ async function getMissionWithCounts(missionId, userId) {
     poll = await getPollForMission(res.rows[0].poll_id, userId);
   }
 
-  return { ...res.rows[0], reactions, poll };
+  const [mission] = await attachMissionRuntime([{ ...res.rows[0], reactions, poll }], userId);
+  return mission;
+}
+
+function serializeSessionSummary(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    arcId: row.arc_id ?? null,
+    missionId: row.mission_id ?? null,
+    title: row.title,
+    sessionNumber: row.session_number ?? null,
+    status: row.status,
+    startedAt: row.started_at,
+    closedAt: row.closed_at ?? null,
+    eventCount: row.event_count != null ? Number(row.event_count) : 0,
+  };
+}
+
+async function attachMissionRuntime(missions, userId) {
+  if (!missions.length) return missions;
+  const ids = missions.map(m => m.id);
+
+  let participantRows = [];
+  try {
+    const res = await query(
+      `SELECT
+         mp.mission_id,
+         mp.user_id,
+         mp.type,
+         mp.invited,
+         mp.joined_at,
+         u.role,
+         COALESCE(u.display_name, u.name) AS player_name,
+         pc.id AS character_id,
+         pc.name AS character_name,
+         pc.level,
+         pc.token_img,
+         pc.portrait_img,
+         pc.active,
+         pc.retired,
+         pc.dead
+       FROM mission_participants mp
+       JOIN users u ON u.id = mp.user_id
+       LEFT JOIN player_characters pc ON pc.id = mp.character_id
+       WHERE mp.mission_id = ANY($1)
+       ORDER BY mp.type ASC, mp.joined_at ASC`,
+      [ids],
+    );
+    participantRows = res.rows;
+  } catch {
+    participantRows = [];
+  }
+
+  let sessionRows = [];
+  try {
+    const res = await query(
+      `SELECT
+         COALESCE(sl.mission_id, ma.mission_id) AS resolved_mission_id,
+         sl.*,
+         COUNT(rd.id) AS event_count
+       FROM session_logs sl
+       LEFT JOIN mission_arcs ma ON ma.id = sl.arc_id
+       LEFT JOIN resource_deltas rd ON rd.session_id = sl.id AND rd.deleted_at IS NULL
+       WHERE sl.deleted_at IS NULL
+         AND (sl.mission_id = ANY($1) OR ma.mission_id = ANY($1))
+       GROUP BY sl.id, ma.mission_id
+       ORDER BY sl.started_at DESC`,
+      [ids],
+    );
+    sessionRows = res.rows;
+  } catch {
+    sessionRows = [];
+  }
+
+  const participantsByMission = new Map();
+  for (const row of participantRows) {
+    const list = participantsByMission.get(row.mission_id) ?? [];
+    list.push({
+      userId: row.user_id,
+      type: row.type,
+      invited: row.invited ?? false,
+      joinedAt: row.joined_at,
+      playerName: row.player_name,
+      role: row.role,
+      isGM: isGM({ role: row.role }),
+      characterId: row.character_id ?? null,
+      characterName: row.character_name ?? row.player_name,
+      level: row.level ?? null,
+      tokenImg: row.token_img ?? null,
+      portraitImg: row.portrait_img ?? null,
+      active: row.active ?? true,
+      retired: row.retired ?? false,
+      dead: row.dead ?? false,
+    });
+    participantsByMission.set(row.mission_id, list);
+  }
+
+  const sessionsByMission = new Map();
+  for (const row of sessionRows) {
+    const missionId = row.resolved_mission_id;
+    if (!missionId) continue;
+    const state = sessionsByMission.get(missionId) ?? { active: null, last: null };
+    if (!state.last) state.last = row;
+    if (!state.active && row.status === 'open') state.active = row;
+    sessionsByMission.set(missionId, state);
+  }
+
+  return missions.map(m => {
+    const sessionState = sessionsByMission.get(m.id) ?? {};
+    return {
+      ...m,
+      participants: participantsByMission.get(m.id) ?? [],
+      activeSession: serializeSessionSummary(sessionState.active),
+      lastSession: serializeSessionSummary(sessionState.last),
+      sessionStatus: sessionState.active ? 'open' : sessionState.last ? sessionState.last.status : null,
+    };
+  });
 }
 
 async function getReactions(missionId, userId) {
@@ -176,11 +294,12 @@ export async function missionRoutes(fastify) {
       } catch { /* polls not migrated yet */ }
     }
 
-    return res.rows.map(m => ({
+    const missions = res.rows.map(m => ({
       ...m,
       reactions: rxRows.filter(r => r.mission_id === m.id),
       poll: polls.find(p => p.id === m.poll_id) || null,
     }));
+    return attachMissionRuntime(missions, req.user.id);
   });
 
   // GET /missions/:id
@@ -283,7 +402,7 @@ export async function missionRoutes(fastify) {
     const { id } = req.params;
     const existing = await query('SELECT * FROM missions WHERE id = $1', [id]);
     if (!existing.rows.length) return reply.code(404).send({ error: 'Not found' });
-    if (existing.rows[0].creator_id !== req.user.id && req.user.role !== 'GM') {
+    if (existing.rows[0].creator_id !== req.user.id && !isGM(req.user)) {
       return reply.code(403).send({ error: 'Forbidden' });
     }
 
@@ -396,6 +515,105 @@ export async function missionRoutes(fastify) {
     return { joined: true, type, mission: updated };
   });
 
+  // POST /missions/:id/session - open or reuse the active linked session
+  fastify.post('/missions/:id/session', async (req, reply) => {
+    if (!assertRateLimit(req, reply, 'missions:session', { limit: 20, windowMs: 60_000 })) return reply;
+    const { id } = req.params;
+
+    const missionRes = await query('SELECT * FROM missions WHERE id = $1', [id]);
+    if (!missionRes.rows.length) return reply.code(404).send({ error: 'Mission not found' });
+    const mission = missionRes.rows[0];
+    if (mission.kind === 'NOTICE') return reply.code(400).send({ error: 'Cannot open a session for a notice' });
+    if (mission.creator_id !== req.user.id && !isGM(req.user)) {
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
+
+    const existingSession = await query(
+      `SELECT sl.*, COUNT(rd.id) AS event_count
+       FROM session_logs sl
+       LEFT JOIN resource_deltas rd ON rd.session_id = sl.id AND rd.deleted_at IS NULL
+       WHERE sl.deleted_at IS NULL
+         AND sl.status = 'open'
+         AND sl.mission_id = $1
+       GROUP BY sl.id
+       ORDER BY sl.started_at DESC
+       LIMIT 1`,
+      [id],
+    );
+
+    if (existingSession.rows.length) {
+      const updatedMission = await getMissionWithCounts(id, req.user.id);
+      return { session: serializeSessionSummary(existingSession.rows[0]), mission: updatedMission, reused: true };
+    }
+
+    let arcRes = await query(
+      `SELECT *
+       FROM mission_arcs
+       WHERE mission_id = $1 AND status = 'active' AND deleted_at IS NULL
+       ORDER BY arc_number DESC
+       LIMIT 1`,
+      [id],
+    );
+
+    if (!arcRes.rows.length) {
+      const nextNum = await query(
+        'SELECT COALESCE(MAX(arc_number), 0) + 1 AS next_num FROM mission_arcs WHERE mission_id = $1 AND deleted_at IS NULL',
+        [id],
+      );
+      arcRes = await query(
+        `INSERT INTO mission_arcs (mission_id, title, arc_number, description, primary_gm_id)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *`,
+        [id, mission.title, nextNum.rows[0].next_num, mission.description ?? null, req.user.id],
+      );
+      broadcast('ARC_CREATED', {
+        id: arcRes.rows[0].id,
+        missionId: id,
+        title: arcRes.rows[0].title,
+        arcNumber: arcRes.rows[0].arc_number,
+        status: arcRes.rows[0].status,
+      });
+    }
+
+    const arc = arcRes.rows[0];
+    const sessionNumberRes = await query(
+      `SELECT COALESCE(MAX(session_number), 0) + 1 AS next_num
+       FROM session_logs
+       WHERE mission_id = $1 AND deleted_at IS NULL`,
+      [id],
+    );
+    const participants = await query(
+      `SELECT user_id FROM mission_participants WHERE mission_id = $1 AND type = 'PLAYER' ORDER BY joined_at ASC`,
+      [id],
+    );
+    const playerIds = participants.rows.map(p => p.user_id);
+    const title = req.body?.title?.trim() || `Sessão ${sessionNumberRes.rows[0].next_num} — ${mission.title}`;
+
+    const created = await query(
+      `INSERT INTO session_logs
+         (title, campaign, session_number, opened_by, primary_gm_id,
+          narrator_ids, player_ids, arc_id, mission_id)
+       VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [
+        title,
+        mission.title,
+        sessionNumberRes.rows[0].next_num,
+        req.user.id,
+        [req.user.id],
+        playerIds,
+        arc.id,
+        id,
+      ],
+    );
+
+    const session = serializeSessionSummary({ ...created.rows[0], event_count: 0 });
+    const updatedMission = await getMissionWithCounts(id, req.user.id);
+    broadcast('SESSION_CREATED', session);
+    broadcast('MISSION_UPDATED', updatedMission);
+    return reply.code(201).send({ session, mission: updatedMission, reused: false });
+  });
+
   // DELETE /missions/:id/join
   fastify.delete('/missions/:id/join', async (req, reply) => {
     const { id } = req.params;
@@ -414,7 +632,7 @@ export async function missionRoutes(fastify) {
     const { userId } = req.body;
     const mission = await query('SELECT * FROM missions WHERE id = $1', [id]);
     if (!mission.rows.length) return reply.code(404).send({ error: 'Not found' });
-    if (mission.rows[0].creator_id !== req.user.id && req.user.role !== 'GM') {
+    if (mission.rows[0].creator_id !== req.user.id && !isGM(req.user)) {
       return reply.code(403).send({ error: 'Forbidden' });
     }
     await query(

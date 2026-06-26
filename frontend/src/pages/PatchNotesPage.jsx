@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
-import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAuth, isGM, isGMPrincipal, roleLabel } from '../contexts/AuthContext.jsx';
 import {
   Plus, ExternalLink, FileText, BookOpen,
   Trash2, Eye, EyeOff, X, Upload, Link as LinkIcon,
@@ -888,17 +888,17 @@ function PatchNoteForm({ onClose, onCreate }) {
 // ── PatchNotesPage ─────────────────────────────────────────────────────────────
 export default function PatchNotesPage() {
   const { user }   = useAuth();
-  const isGM       = user?.role === 'GM';
+  const currentUserIsGM       = isGM(user);
   const [notes,    setNotes]    = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [showForm, setShowForm] = useState(false);
 
   useEffect(() => {
     setLoading(true);
-    api.get(isGM ? '/patch-notes/all' : '/patch-notes')
+    api.get(currentUserIsGM ? '/patch-notes/all' : '/patch-notes')
       .then(setNotes).catch(console.error)
       .finally(() => setLoading(false));
-  }, [isGM]);
+  }, [currentUserIsGM]);
 
   return (
     <div className="pn-page">
@@ -907,7 +907,7 @@ export default function PatchNotesPage() {
           <h2 className="pn-page-title">📜 Atualizações de Regras</h2>
           <p className="pn-page-sub">Notas de patch e documentos de regras da campanha</p>
         </div>
-        {isGM && (
+        {currentUserIsGM && (
           <button onClick={() => setShowForm(true)} className="pn-new-btn">
             <Plus size={14} /> Nova nota
           </button>
@@ -922,12 +922,12 @@ export default function PatchNotesPage() {
         <div className="pn-empty">
           <BookOpen size={32} style={{ opacity: 0.3 }} />
           <p>Nenhuma nota de patch publicada ainda.</p>
-          {isGM && <button onClick={() => setShowForm(true)} className="pn-empty-cta">Criar a primeira nota</button>}
+          {currentUserIsGM && <button onClick={() => setShowForm(true)} className="pn-empty-cta">Criar a primeira nota</button>}
         </div>
       ) : (
         <div className="pn-list">
           {notes.map(note => (
-            <PatchNoteCard key={note.id} note={note} isGM={isGM}
+            <PatchNoteCard key={note.id} note={note} isGM={currentUserIsGM}
               onDeleted={id => setNotes(p => p.filter(n => n.id !== id))}
               onTogglePublish={updated => setNotes(p => p.map(n => n.id === updated.id ? updated : n))}
             />

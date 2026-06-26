@@ -1,6 +1,6 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { useAuth, roleLabel } from '../contexts/AuthContext.jsx';
+import { useAuth, roleLabel, isGM, isGMPrincipal } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
 import { api } from '../lib/api.js';
 import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil, UserCircle, BookOpen } from 'lucide-react';
@@ -15,7 +15,7 @@ function FoundryButton({ user }) {
 
   if (!foundryUrl) return null;
 
-  const label = user?.role === 'GM' ? 'Iniciar Aventura' : 'Entrar na Aventura';
+  const label = isGM(user) ? 'Iniciar Aventura' : 'Entrar na Aventura';
 
   return (
     <button onClick={() => window.open(foundryUrl, '_blank')} className="foundry-btn" title={foundryUrl}>
@@ -45,7 +45,7 @@ function UserChip({ user }) {
         <span className="role-label">
           {roleLabel(user.role)}
         </span>
-        {user.role === 'GM' && <span className="gm-badge">GM</span>}
+        {isGM(user) && <span className="gm-badge">GM</span>}
       </div>
 
       {showEdit && <EditDisplayNameModal onClose={() => setShowEdit(false)} />}
@@ -87,7 +87,7 @@ export default function Layout() {
               to="/patch-notes" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
               Atualizações
             </NavLink>
-            {(user?.role === 'GM' || user?.role === 'GM_PRINCIPAL') && (
+            {(isGM(user)) && (
               <NavLink to="/gm/sessions" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
                 <BookOpen size={14} /><span>Sessões</span>
               </NavLink>

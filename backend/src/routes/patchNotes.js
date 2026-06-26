@@ -18,6 +18,7 @@ import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
+import { isGM, isGMPrincipal, isAdmin, requireGM, requireGMPrincipal, requireAdmin } from '../lib/roles.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 const HOMEBREW_ORIGIN   = 'https://homebrewery.naturalcrit.com';
@@ -89,7 +90,7 @@ export async function patchNoteRoutes(fastify) {
 
   // ── GET /patch-notes/all (GM only — inclui não publicadas) ─────────────────
   fastify.get('/patch-notes/all', async (req, reply) => {
-    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
+    if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
     const res = await query(
       `SELECT pn.*, COALESCE(u.display_name, u.name) AS author_display_name
        FROM patch_notes pn
@@ -111,7 +112,7 @@ export async function patchNoteRoutes(fastify) {
     if (!res.rows.length) return reply.code(404).send({ error: 'Not found' });
     const note = res.rows[0];
     // Jogadores só veem publicadas
-    if (!note.published && req.user.role !== 'GM') {
+    if (!note.published && !isGM(req.user)) {
       return reply.code(404).send({ error: 'Not found' });
     }
     return serializePatchNote(note);
@@ -122,7 +123,7 @@ export async function patchNoteRoutes(fastify) {
   // O campo `homebrew_url` e o arquivo são mutuamente opcionais — mas ao menos
   // um deve estar presente.
   fastify.post('/patch-notes', async (req, reply) => {
-    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
+    if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
 
     // Lê multipart — campos de texto vêm como fields, arquivo como file
     const parts   = req.parts();
@@ -242,7 +243,7 @@ export async function patchNoteRoutes(fastify) {
       },
     },
   }, async (req, reply) => {
-    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
+    if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
 
     const existing = await query('SELECT * FROM patch_notes WHERE id = $1', [req.params.id]);
     if (!existing.rows.length) return reply.code(404).send({ error: 'Not found' });
@@ -290,7 +291,7 @@ export async function patchNoteRoutes(fastify) {
 
   // ── DELETE /patch-notes/:id (GM only) ─────────────────────────────────────
   fastify.delete('/patch-notes/:id', async (req, reply) => {
-    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
+    if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
 
     const res = await query(
       'DELETE FROM patch_notes WHERE id = $1 RETURNING id',

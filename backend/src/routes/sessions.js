@@ -24,38 +24,7 @@
 import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
 import { assertRateLimit } from '../middleware/rateLimit.js';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Guards de role
-// ─────────────────────────────────────────────────────────────────────────────
-
-const GM_ROLES = new Set(['GM', 'GM_PRINCIPAL']);
-
-/** Qualquer GM pode registrar eventos e consultar sessões. */
-function isGM(user) {
-  return GM_ROLES.has(user?.role);
-}
-
-/** Somente o GM Principal pode abrir/fechar sessões e editar eventos retroativamente. */
-function isGMPrincipal(user) {
-  return user?.role === 'GM_PRINCIPAL';
-}
-
-function requireGM(req, reply) {
-  if (!isGM(req.user)) {
-    reply.code(403).send({ error: 'Apenas GMs podem acessar este recurso.' });
-    return false;
-  }
-  return true;
-}
-
-function requireGMPrincipal(req, reply) {
-  if (!isGMPrincipal(req.user)) {
-    reply.code(403).send({ error: 'Apenas o GM Principal pode executar esta ação.' });
-    return false;
-  }
-  return true;
-}
+import { isGM, isGMPrincipal, requireGM, requireGMPrincipal } from '../lib/roles.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Serializers
@@ -92,6 +61,10 @@ function serializeEvent(row) {
   return {
     id:            row.id,
     sessionId:     row.session_id,
+    arcId:         row.arc_id         ?? null,
+    missionId:     row.mission_id     ?? null,
+    characterId:   row.character_id   ?? null,
+    outOfSession:  row.out_of_session ?? false,
     playerId:      row.player_id,
     playerName:    row.player_name    ?? null,
     actorName:     row.actor_name,
@@ -502,17 +475,20 @@ export async function sessionRoutes(fastify) {
     }
 
     const session = await query(
-      `SELECT id, status, narrator_ids FROM session_logs WHERE id = $1 AND deleted_at IS NULL`,
+      `SELECT id, status, narrator_ids, arc_id, mission_id FROM session_logs WHERE id = $1 AND deleted_at IS NULL`,
       [req.params.id],
     );
     if (!session.rows.length) return reply.code(404).send({ error: 'Sessão não encontrada.' });
 
     const sl = session.rows[0];
+
+    // Sessões fechadas ainda aceitam eventos — marcados como out_of_session = TRUE.
+    // Isso preserva a sincronização com o Foundry sem criar inconsistências.
     if (sl.status !== 'open') {
-      return reply.code(400).send({ error: 'Não é possível registrar eventos em sessão fechada.' });
+      return reply.code(400).send({ error: `SessÃ£o jÃ¡ estÃ¡ com status "${sl.status}" e nÃ£o aceita novos eventos.` });
     }
 
-    // GM comum só pode registrar em sessões onde é narrador
+    // GM comum só pode registrar em sessões onde é narrador (aberta ou fechada)
     if (!isGMPrincipal(req.user) && !sl.narrator_ids.includes(req.user.id)) {
       return reply.code(403).send({ error: 'Você não é narrador desta sessão.' });
     }
@@ -544,18 +520,33 @@ export async function sessionRoutes(fastify) {
       return reply.code(400).send({ error: 'playerId não encontrado.' });
     }
 
+    if (sl.mission_id) {
+      const participantCheck = await query(
+        `SELECT 1
+         FROM mission_participants
+         WHERE mission_id = $1 AND user_id = $2
+         LIMIT 1`,
+        [sl.mission_id, playerId],
+      );
+      if (!participantCheck.rows.length) {
+        return reply.code(403).send({ error: 'Jogador nÃ£o participa desta missÃ£o.' });
+      }
+    }
+
     // Resolve actorName: se characterId foi fornecido, valida e deriva o nome
     let resolvedActorName = req.body.actorName?.trim() ?? null;
 
-    if (characterId) {
-      if (!isValidUuid(characterId)) {
+    let resolvedCharacterId = characterId;
+
+    if (resolvedCharacterId) {
+      if (!isValidUuid(resolvedCharacterId)) {
         return reply.code(400).send({ error: `characterId inválido: "${characterId}". Deve ser um UUID.` });
       }
       const charCheck = await query(
         `SELECT id, name, user_id, active, retired, dead
          FROM player_characters
          WHERE id = $1`,
-        [characterId],
+        [resolvedCharacterId],
       );
 
       if (!charCheck.rows.length) {
@@ -584,6 +575,22 @@ export async function sessionRoutes(fastify) {
       return reply.code(400).send({ error: 'actorName ou characterId válido é obrigatório.' });
     }
 
+    if (!resolvedCharacterId) {
+      const charByName = await query(
+        `SELECT id
+         FROM player_characters
+         WHERE user_id = $1
+           AND lower(name) = lower($2)
+           AND active = TRUE
+           AND retired = FALSE
+           AND dead = FALSE
+         ORDER BY updated_at DESC NULLS LAST
+         LIMIT 1`,
+        [playerId, resolvedActorName],
+      );
+      resolvedCharacterId = charByName.rows[0]?.id ?? null;
+    }
+
     let res;
     try {
       res = await query(
@@ -592,9 +599,11 @@ export async function sessionRoutes(fastify) {
             registered_by, source,
             resource_type, delta,
             value_before, value_after, delta_meta,
-            description, foundry_event_id, occurred_at)
+            description, foundry_event_id, occurred_at,
+            out_of_session, arc_id, mission_id, character_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                 COALESCE($13::timestamptz, NOW()))
+                 COALESCE($13::timestamptz, NOW()),
+                 FALSE, $14, $15, $16)
          RETURNING *`,
         [
           req.params.id,
@@ -610,14 +619,12 @@ export async function sessionRoutes(fastify) {
           description?.trim() ?? null,
           foundryEventId ?? null,
           occurredAt,
+          sl.arc_id     ?? null,
+          sl.mission_id ?? null,
+          resolvedCharacterId ?? null,
         ],
       );
     } catch (err) {
-      // Trigger fn_guard_session_open lança este código se a sessão foi fechada
-      // entre o check acima e o INSERT
-      if (err.message?.includes('session_not_open')) {
-        return reply.code(409).send({ error: 'A sessão foi fechada antes do evento ser salvo.' });
-      }
       // Chave duplicada em foundry_event_id → idempotência para o módulo Foundry
       if (err.code === '23505' && err.constraint?.includes('foundry_event_id')) {
         return reply.code(409).send({ error: 'Evento já registrado (foundry_event_id duplicado).' });

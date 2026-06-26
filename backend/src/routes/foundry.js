@@ -1,6 +1,29 @@
 import { query } from '../db/index.js';
 import { signFoundryToken, verifyFoundryToken } from '../services/foundryAuth.js';
+import { resolveFoundryMapping } from '../services/foundryMap.js';
 import { readFoundryActorsDb, syncFoundryActors, upsertFoundryActors } from '../services/foundrySync.js';
+import { isGM, isGMPrincipal, isAdmin, requireGM, requireGMPrincipal, requireAdmin } from '../lib/roles.js';
+
+function resolveFoundryLaunchUrl() {
+  const publicUrl = process.env.FOUNDRY_PUBLIC_URL?.trim();
+  if (publicUrl) return publicUrl.replace(/\/$/, '');
+
+  const configuredUrl = process.env.FOUNDRY_URL?.trim();
+  if (!configuredUrl) return null;
+
+  const devUrl = process.env.FOUNDRY_LOCAL_URL?.trim() || process.env.FOUNDRY_DEV_URL?.trim();
+  if (process.env.NODE_ENV !== 'production' && configuredUrl.includes('host.docker.internal')) {
+    return (devUrl || configuredUrl.replace('host.docker.internal', 'localhost')).replace(/\/$/, '');
+  }
+
+  return configuredUrl.replace(/\/$/, '');
+}
+
+function buildFoundryLaunchUrl(baseUrl, token) {
+  const url = new URL(baseUrl);
+  url.searchParams.set('t', token);
+  return url.toString();
+}
 
 /**
  * Foundry VTT integration routes.
@@ -62,7 +85,7 @@ export async function foundryRoutes(fastify) {
 
   // ── GET /foundry/launch ────────────────────────────────────────────────────
   fastify.get('/foundry/launch', async (req, reply) => {
-    const foundryBaseUrl = (process.env.FOUNDRY_PUBLIC_URL || process.env.FOUNDRY_URL)?.replace(/\/$/, '');
+    const foundryBaseUrl = resolveFoundryLaunchUrl();
     if (!foundryBaseUrl) {
       return reply.code(503).send({ error: 'Foundry URL is not configured on the server.' });
     }
@@ -72,23 +95,67 @@ export async function foundryRoutes(fastify) {
     }
 
     const { email } = req.user;
-    const result = await query(
-      'SELECT role, world, actor_name FROM user_foundry_map WHERE email = $1',
-      [email],
-    );
-    if (!result.rows.length) {
-      return reply.code(404).send({ error: 'No Foundry mapping exists for this user.' });
+    const mapping = await resolveFoundryMapping(undefined, email);
+    const activeSessionId = req.query?.sessionId || req.query?.activeSessionId || null;
+
+    let sessionContext = {};
+    if (activeSessionId) {
+      const sessionRes = await query(
+        `SELECT sl.id, sl.status, sl.mission_id, m.creator_id
+         FROM session_logs sl
+         LEFT JOIN missions m ON m.id = sl.mission_id
+         WHERE sl.id = $1 AND sl.deleted_at IS NULL`,
+        [activeSessionId],
+      );
+      if (!sessionRes.rows.length) {
+        return reply.code(404).send({ error: 'Session not found.' });
+      }
+
+      const session = sessionRes.rows[0];
+      if (session.status !== 'open') {
+        return reply.code(400).send({ error: 'Session is not open.' });
+      }
+      if (!session.mission_id) {
+        return reply.code(400).send({ error: 'Session is not linked to a mission.' });
+      }
+
+      const participantRes = await query(
+        `SELECT character_id
+         FROM mission_participants
+         WHERE mission_id = $1 AND user_id = $2
+         LIMIT 1`,
+        [session.mission_id, req.user.id],
+      );
+      const isMissionAuthor = session.creator_id === req.user.id;
+      const participant = participantRes.rows[0] ?? null;
+      if (!isMissionAuthor && !participant) {
+        return reply.code(403).send({ error: 'Only mission participants can enter this session.' });
+      }
+
+      sessionContext = {
+        activeSessionId,
+        sessionId: activeSessionId,
+        missionId: session.mission_id,
+        userId: req.user.id,
+        characterId: participant?.character_id ?? null,
+        isMissionAuthor,
+      };
     }
 
-    const mapping = result.rows[0];
     const token   = signFoundryToken({
+      e:         email,
+      r:         mapping.role,
+      w:         mapping.world,
+      a:         mapping.actor_name,
       email,
       role:      mapping.role,
       world:     mapping.world,
       actorName: mapping.actor_name,
-    });
+      actor:     mapping.actor_name,
+      ...sessionContext,
+    }, secret);
 
-    return { url: `${foundryBaseUrl}/nimrod-login?token=${encodeURIComponent(token)}` };
+    return { url: buildFoundryLaunchUrl(foundryBaseUrl, token) };
   });
 
   // ── POST /nimrod/verify ────────────────────────────────────────────────────
@@ -100,7 +167,7 @@ export async function foundryRoutes(fastify) {
     if (!token) return reply.code(400).send({ error: 'token is required' });
 
     try {
-      const payload = verifyFoundryToken(token);
+      const payload = verifyFoundryToken(token, secret);
       return reply.send(payload);
     } catch {
       return reply.code(401).send({ error: 'Invalid token' });
@@ -108,8 +175,75 @@ export async function foundryRoutes(fastify) {
   });
 
   // ── GET /foundry/mapping ───────────────────────────────────────────────────
+  async function registerSessionPresence(req, reply, leaving = false) {
+    const secret = process.env.FOUNDRY_JWT_SECRET;
+    if (!secret) return reply.code(503).send({ error: 'Foundry JWT secret is not configured.' });
+
+    const token = req.body?.token;
+    if (!token) return reply.code(400).send({ error: 'token is required' });
+
+    let payload;
+    try {
+      payload = verifyFoundryToken(token, secret);
+    } catch {
+      return reply.code(401).send({ error: 'Invalid token' });
+    }
+
+    const sessionId = payload.sessionId || payload.activeSessionId;
+    const missionId = payload.missionId ?? null;
+    const userId = payload.userId ?? null;
+    const characterId = req.body?.characterId || payload.characterId || null;
+    const actorName = req.body?.actorName || payload.actor || payload.actorName || payload.a || null;
+
+    if (!sessionId || !missionId || !userId) {
+      return reply.code(400).send({ error: 'token does not contain session context' });
+    }
+
+    const session = await query(
+      `SELECT id, status FROM session_logs WHERE id = $1 AND deleted_at IS NULL`,
+      [sessionId],
+    );
+    if (!session.rows.length) return reply.code(404).send({ error: 'Session not found.' });
+
+    if (!leaving && session.rows[0].status !== 'open') {
+      return reply.code(400).send({ error: 'Session is not open.' });
+    }
+
+    if (leaving) {
+      const res = await query(
+        `UPDATE session_attendance
+         SET left_at = COALESCE(left_at, NOW()),
+             actor_name = COALESCE($4, actor_name)
+         WHERE session_id = $1
+           AND mission_id = $2
+           AND user_id = $3
+           AND left_at IS NULL
+         RETURNING *`,
+        [sessionId, missionId, userId, actorName],
+      );
+      return { ok: true, attendance: res.rows[0] ?? null };
+    }
+
+    const res = await query(
+      `INSERT INTO session_attendance
+         (session_id, mission_id, user_id, character_id, actor_name, entered_at, last_seen_at)
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+       ON CONFLICT (session_id, user_id) DO UPDATE SET
+         character_id = COALESCE(EXCLUDED.character_id, session_attendance.character_id),
+         actor_name = COALESCE(EXCLUDED.actor_name, session_attendance.actor_name),
+         last_seen_at = NOW(),
+         left_at = NULL
+       RETURNING *`,
+      [sessionId, missionId, userId, characterId, actorName],
+    );
+    return { ok: true, attendance: res.rows[0] };
+  }
+
+  fastify.post('/nimrod/session/enter', async (req, reply) => registerSessionPresence(req, reply, false));
+  fastify.post('/nimrod/session/leave', async (req, reply) => registerSessionPresence(req, reply, true));
+
   fastify.get('/foundry/mapping', async (req, reply) => {
-    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
+    if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
     const result = await query(
       `SELECT email, role, world, actor_name AS "actorName" FROM user_foundry_map ORDER BY email`,
     );
@@ -118,7 +252,7 @@ export async function foundryRoutes(fastify) {
 
   // ── PUT /foundry/mapping ───────────────────────────────────────────────────
   fastify.put('/foundry/mapping', async (req, reply) => {
-    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
+    if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
 
     const { email, role, world, actorName } = req.body ?? {};
     if (!email || !role || !world) {
@@ -138,7 +272,7 @@ export async function foundryRoutes(fastify) {
 
   // ── DELETE /foundry/mapping/:email ─────────────────────────────────────────
   fastify.delete('/foundry/mapping/:email', async (req, reply) => {
-    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
+    if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
 
     const result = await query(
       'DELETE FROM user_foundry_map WHERE email = $1 RETURNING email',
@@ -238,7 +372,7 @@ export async function foundryRoutes(fastify) {
   });
 
   fastify.post('/foundry/actors/sync', async (req, reply) => {
-    if (req.user.role !== 'GM') return reply.code(403).send({ error: 'GM only' });
+    if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
     return syncFoundryActors();
   });
 }

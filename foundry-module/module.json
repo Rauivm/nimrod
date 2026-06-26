@@ -1,0 +1,29 @@
+{
+  "id": "nimrod-bridge",
+  "title": "Nimrod Bridge",
+  "description": "Reads Nimrod launch JWTs, activates linked Nimrod sessions, records presence, and opens mapped actor sheets.",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "11",
+    "verified": "14"
+  },
+  "authors": [
+    {
+      "name": "Nimrod"
+    }
+  ],
+  "scripts": [
+    "nimrod-bridge.js"
+  ],
+  "relationships": {
+    "requires": [
+      {
+        "id": "nimrod-session",
+        "type": "module",
+        "compatibility": {
+          "minimum": "1.0.0"
+        }
+      }
+    ]
+  }
+}

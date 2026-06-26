@@ -1,10 +1,11 @@
 import { memo, useCallback, useEffect, useState, useMemo } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Users, Calendar, Coins, Edit3, Trash2, X, Check, UserPlus, ChevronDown, ChevronUp, Scroll } from 'lucide-react';
+import { Users, Calendar, Coins, Edit3, Trash2, X, Check, UserPlus, ChevronDown, ChevronUp, Scroll, PlayCircle, Dice5, Clock3 } from 'lucide-react';
 import { api } from '../lib/api.js';
-import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAuth, isGM, isGMPrincipal, roleLabel } from '../contexts/AuthContext.jsx';
 import JoinMissionModal from './JoinMissionModal.jsx';
+import { useFoundryLaunch } from '../hooks/useFoundryLaunch.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,58 @@ function ParticipantAvatars({ count, maxPlayers, userJoined }) {
             border: userJoined && i === 0 ? '2px solid #c9a84c' : '2px solid rgba(200,169,112,0.2)',
           }}>
           {i === 0 && userJoined ? '📌' : '⚔'}
+        </div>
+      ))}
+      {count > 5 && (
+        <div className="poster-avatar poster-avatar-overflow" style={{ marginLeft: '-8px', zIndex: 0 }}>
+          +{count - 5}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function foundryAsset(src) {
+  if (!src) return null;
+  if (src.startsWith('/uploads/')) return src;
+  try {
+    return `/api/foundry/assets?path=${encodeURIComponent(src.startsWith('http') ? new URL(src).pathname : src)}`;
+  } catch {
+    return `/api/foundry/assets?path=${encodeURIComponent(src)}`;
+  }
+}
+
+function inviteDisplayName(player) {
+  return player?.displayName || player?.display_name || player?.name || 'Jogador';
+}
+
+function inviteCharacter(player) {
+  const characters = player?.characters || player?.playerCharacters || [];
+  return Array.isArray(characters) ? characters[0] : null;
+}
+
+function inviteAvatar(player, character) {
+  return character?.tokenImg || character?.token_img || character?.portraitImg || character?.portrait_img || player?.avatarUrl || player?.avatar_url || null;
+}
+
+function RealParticipantAvatars({ participants = [], count, userJoined }) {
+  const visible = participants.slice(0, 5);
+  const colors = ['#8b2020','#7a4020','#2a5a3a','#2a3a7a','#5a2a7a'];
+  return (
+    <div className="poster-avatars">
+      {visible.map((p, i) => (
+        <div key={`${p.userId}-${p.characterId || i}`}
+          className={`poster-avatar ${p.isGM ? 'poster-avatar-gm' : ''} ${p.dead || p.retired || !p.active ? 'poster-avatar-muted' : ''}`}
+          title={`${p.characterName || p.playerName}${p.isGM ? ' · GM' : ''}${p.dead ? ' · morto' : p.retired ? ' · aposentado' : !p.active ? ' · inativo' : ''}`}
+          style={{
+            background: colors[i % colors.length],
+            marginLeft: i === 0 ? 0 : '-8px',
+            zIndex: visible.length - i,
+            border: userJoined && i === 0 ? '2px solid #c9a84c' : '2px solid rgba(200,169,112,0.2)',
+          }}>
+          {p.tokenImg || p.portraitImg
+            ? <img src={foundryAsset(p.tokenImg || p.portraitImg)} alt={p.characterName || p.playerName} className="poster-avatar-img" />
+            : <span>{(p.characterName || p.playerName || '?')[0]}</span>}
         </div>
       ))}
       {count > 5 && (
@@ -171,6 +224,7 @@ function InlinePoll({ missionId, poll, onUpdate }) {
 // ── Main poster ────────────────────────────────────────────────────────────────
 export const MissionPoster = memo(function MissionPoster({ mission: initialMission, onUpdate }) {
   const { user } = useAuth();
+  const { launch, loading: launchingFoundry } = useFoundryLaunch();
   const [mission, setLocalMission] = useState(initialMission);
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -188,8 +242,8 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
 
   const isNotice   = mission.kind === 'NOTICE';
   const isCreator  = user?.id === mission.creator_id;
-  const isGM       = user?.role === 'GM';
-  const canManage  = isCreator || isGM;
+  const currentUserIsGM       = isGM(user);
+  const canManage  = isCreator || currentUserIsGM;
   const isOpen     = mission.status === 'OPEN';
   const isFinished = mission.status === 'FINISHED';
   const isClosed   = mission.status === 'CLOSED';
@@ -199,6 +253,11 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
   const reserveCount = parseInt(mission.reserve_count) || 0;
   const playersFull  = playerCount >= mission.max_players;
   const reservesFull = reserveCount >= mission.max_reserves;
+  const participants = mission.participants ?? [];
+  const activeSession = mission.activeSession ?? null;
+  const lastSession = mission.lastSession ?? null;
+  const canOpenSession = !isNotice && canManage;
+  const canEnterFoundry = !isNotice && activeSession && (isCreator || (isOpen && mission.user_joined));
 
   // Banner: MISSÃO / AVISO / ENCERRADO / CONCLUÍDO
   const bannerLabel = isNotice
@@ -277,6 +336,21 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
     catch (e) { alert(e.message); }
   };
 
+  const openMissionSession = async () => {
+    setLoading(true);
+    try {
+      const res = await api.post(`/missions/${mission.id}/session`, {});
+      if (res.mission) emitMission(res.mission);
+      if (res.session?.id) await launch({ sessionId: res.session.id });
+    } catch (e) { alert(e.message); }
+    setLoading(false);
+  };
+
+  const enterFoundry = async () => {
+    const sessionId = mission.activeSession?.id || mission.lastSession?.id || null;
+    await launch(sessionId ? { sessionId } : {});
+  };
+
   const updateReactions = useCallback((reactions) => {
     onUpdate?.({ ...mission, reactions });
   }, [mission, onUpdate]);
@@ -298,7 +372,9 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
 
         {/* Participant pins — missions only */}
         {!isNotice && playerCount > 0 && (
-          <ParticipantAvatars count={playerCount} maxPlayers={mission.max_players} userJoined={mission.user_joined} />
+          participants.length
+            ? <RealParticipantAvatars participants={participants} count={participants.length || playerCount} userJoined={mission.user_joined} />
+            : <ParticipantAvatars count={playerCount} maxPlayers={mission.max_players} userJoined={mission.user_joined} />
         )}
         {!isNotice && mission.user_joined && playerCount === 0 && (
           <div className="poster-pin">📌</div>
@@ -345,6 +421,16 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
                 </span>
               )}
             </div>
+            {(activeSession || lastSession) && (
+              <div className={`poster-meta-row ${activeSession ? 'poster-session-open' : ''}`}>
+                {activeSession ? <PlayCircle size={11} /> : <Clock3 size={11} />}
+                <span>
+                  {activeSession
+                    ? `Sessão em andamento${activeSession.sessionNumber ? ` #${activeSession.sessionNumber}` : ''}`
+                    : `Última sessão${lastSession.sessionNumber ? ` #${lastSession.sessionNumber}` : ''}`}
+                </span>
+              </div>
+            )}
             {mission.reward && (
               <div className="poster-meta-row poster-reward">
                 <Coins size={11} /><span>{mission.reward}</span>
@@ -390,6 +476,34 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
 
             <p className="poster-description">{mission.description}</p>
 
+            {!isNotice && participants.length > 0 && (
+              <div className="poster-participants-panel">
+                <div className="poster-panel-title">Participantes</div>
+                <div className="poster-participant-list">
+                  {participants.map(p => (
+                    <div key={`${p.userId}-${p.characterId || p.type}`} className={`poster-participant-row ${p.isGM ? 'poster-participant-gm' : ''}`}>
+                      <div className="poster-participant-token">
+                        {p.tokenImg || p.portraitImg
+                          ? <img src={foundryAsset(p.tokenImg || p.portraitImg)} alt={p.characterName || p.playerName} />
+                          : <span>{(p.characterName || p.playerName || '?')[0]}</span>}
+                      </div>
+                      <div className="poster-participant-copy">
+                        <span className="poster-participant-name">{p.characterName || p.playerName}</span>
+                        <span className="poster-participant-sub">
+                          {p.playerName}{p.isGM ? ' · GM' : ''}{p.type === 'RESERVE' ? ' · reserva' : ''}
+                        </span>
+                      </div>
+                      {(p.dead || p.retired || !p.active) && (
+                        <span className="poster-participant-state">
+                          {p.dead ? 'Morto' : p.retired ? 'Aposentado' : 'Inativo'}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Inline poll */}
             {mission.poll && (
               <InlinePoll missionId={mission.id} poll={mission.poll} onUpdate={onUpdate} />
@@ -406,8 +520,20 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
             )}
 
             <div className="poster-actions">
+              {canEnterFoundry && (
+                <button onClick={enterFoundry} disabled={launchingFoundry} className="poster-btn poster-btn-primary">
+                  <Dice5 size={11} /> Entrar na aventura
+                </button>
+              )}
+
+              {canOpenSession && (
+                <button onClick={openMissionSession} disabled={loading} className="poster-btn poster-btn-outline">
+                  <Scroll size={11} /> {activeSession ? 'Abrir Sessão' : 'Abrir Sessão'}
+                </button>
+              )}
+
               {/* Player join */}
-              {!isNotice && !canManage && isOpen && (
+              {!isNotice && isOpen && (
                 mission.user_joined ? (
                   <button onClick={leave} disabled={loading} className="poster-btn poster-btn-outline">Sair</button>
                 ) : playersFull && reservesFull ? (
@@ -473,12 +599,37 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
             {showInvite && (
               <div className="poster-invite-list">
                 <div className="poster-invite-label">Convidar jogador:</div>
-                {inviteUsers.filter(u => u.id !== user?.id).map(u => (
-                  <div key={u.id} className="poster-invite-row">
-                    <span>{u.name}</span>
-                    <button onClick={() => invite(u.id)} className="poster-btn poster-btn-primary">Convidar</button>
-                  </div>
-                ))}
+                {inviteUsers.filter(u => u.id !== user?.id).map(u => {
+                  const character = inviteCharacter(u);
+                  const avatar = inviteAvatar(u, character);
+                  const displayName = inviteDisplayName(u);
+                  const alreadyParticipant = participants.some(p => p.userId === u.id);
+
+                  return (
+                    <div key={u.id} className="poster-invite-row">
+                      <div className="poster-invite-player">
+                        <div className="poster-invite-avatar">
+                          {avatar
+                            ? <img src={foundryAsset(avatar)} alt={displayName} />
+                            : <span>{displayName[0]}</span>}
+                        </div>
+                        <div className="poster-invite-copy">
+                          <span className="poster-invite-name">{displayName}</span>
+                          <span className="poster-invite-character">
+                            {character ? character.name : 'Sem personagem vinculado'}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => invite(u.id)}
+                        className="poster-btn poster-btn-primary"
+                        disabled={alreadyParticipant}
+                      >
+                        {alreadyParticipant ? 'Já participa' : 'Convidar'}
+                      </button>
+                    </div>
+                  );
+                })}
                 <button onClick={() => setShowInvite(false)} className="poster-btn poster-btn-outline" style={{ marginTop: '4px' }}>Fechar</button>
               </div>
             )}
@@ -554,7 +705,11 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
           display: flex; align-items: center; justify-content: center;
           font-size: 11px; position: relative;
           box-shadow: 0 1px 5px rgba(0,0,0,0.45);
+          overflow: hidden;
         }
+        .poster-avatar-img { width: 100%; height: 100%; object-fit: cover; }
+        .poster-avatar-gm { box-shadow: 0 0 0 1px #c9a84c, 0 1px 5px rgba(0,0,0,0.45); }
+        .poster-avatar-muted { filter: grayscale(0.9); opacity: 0.58; }
         .poster-avatar-overflow { background: #3a2508; color: #e8c860; font-size: 9px; font-weight: 700; }
         .poster-pin { text-align: center; font-size: 18px; margin-bottom: 8px; position: relative; z-index: 2; }
         .poster-notice-icon { text-align: center; font-size: 22px; margin-bottom: 8px; position: relative; z-index: 2; }
@@ -571,6 +726,7 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
         /* ── Meta rows ───────────────────────────────────────── */
         .poster-meta { display: flex; flex-direction: column; gap: 5px; position: relative; z-index: 2; }
         .poster-meta-row { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #3a2010; font-family: var(--font-body); }
+        .poster-session-open { color: #1f5f35; font-weight: 700; }
         .poster-meta-level { font-weight: 700; color: #5a3010; letter-spacing: 0.3px; }
         .level-icon { font-size: 12px; line-height: 1; }
         .poster-reward { font-weight: 600; color: #6a3a08; }
@@ -679,6 +835,17 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
         .poster-detail { position: relative; z-index: 2; border-top: 1px dashed #9a7830; padding-top: 10px; margin-top: 4px; }
         .poster-location { font-size: 11px; font-family: var(--font-body); color: #5a3820; font-style: italic; margin-bottom: 8px; padding: 4px 6px; background: rgba(139,90,20,0.07); border-radius: 2px; }
         .poster-description { font-size: 12px; font-family: var(--font-body); color: #2a1a08; line-height: 1.65; margin-bottom: 10px; font-style: italic; }
+        .poster-participants-panel { margin-bottom: 10px; padding: 8px; background: rgba(80,45,12,0.08); border: 1px dashed #9a7820; border-radius: 2px; }
+        .poster-panel-title { font-size: 10px; color: #5a3a10; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+        .poster-participant-list { display: grid; gap: 5px; }
+        .poster-participant-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 7px; align-items: center; min-width: 0; }
+        .poster-participant-token { width: 28px; height: 28px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #5a3010; color: #f1d890; font-size: 11px; font-weight: 800; box-shadow: 0 1px 5px rgba(0,0,0,0.35); }
+        .poster-participant-token img { width: 100%; height: 100%; object-fit: cover; }
+        .poster-participant-copy { min-width: 0; display: flex; flex-direction: column; }
+        .poster-participant-name { font-size: 12px; color: #251404; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .poster-participant-sub { font-size: 10px; color: #6a4a20; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .poster-participant-gm .poster-participant-token { box-shadow: 0 0 0 1px #c9a84c, 0 1px 5px rgba(0,0,0,0.35); }
+        .poster-participant-state { font-size: 9px; color: #7a2020; border: 1px solid rgba(122,32,32,0.35); border-radius: 2px; padding: 1px 4px; }
 
         /* ── Stars ───────────────────────────────────────────── */
         .poster-stars { display: flex; align-items: center; justify-content: center; gap: 2px; margin-bottom: 8px; }
@@ -706,7 +873,13 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
         /* ── Invite list ─────────────────────────────────────── */
         .poster-invite-list { margin-top: 8px; padding: 8px; background: rgba(139,90,20,0.07); border: 1px dashed #9a7820; border-radius: 2px; }
         .poster-invite-label { font-size: 10px; color: #6a4a20; letter-spacing: 0.5px; margin-bottom: 6px; text-transform: uppercase; }
-        .poster-invite-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; border-bottom: 1px solid rgba(139,90,20,0.18); font-size: 11px; font-family: var(--font-body); color: #2a1a08; }
+        .poster-invite-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid rgba(139,90,20,0.18); font-size: 11px; font-family: var(--font-body); color: #2a1a08; }
+        .poster-invite-player { display: flex; align-items: center; gap: 7px; min-width: 0; }
+        .poster-invite-avatar { width: 28px; height: 28px; flex: 0 0 28px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #5a3010; color: #f1d890; font-size: 11px; font-weight: 800; box-shadow: 0 1px 5px rgba(0,0,0,0.28); }
+        .poster-invite-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .poster-invite-copy { min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+        .poster-invite-name { color: #251404; font-size: 11px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .poster-invite-character { color: #6a4a20; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
         /* ── Corner aging ────────────────────────────────────── */
         .poster-corner { position: absolute; width: 16px; height: 16px; pointer-events: none; z-index: 3; }

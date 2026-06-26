@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Users, MapPin, Calendar, Coins, Star, ChevronDown, ChevronUp, Crown, Shield, Edit3, Trash2, X, Check, UserPlus } from 'lucide-react';
 import { api } from '../lib/api.js';
-import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAuth, isGM, isGMPrincipal, roleLabel } from '../contexts/AuthContext.jsx';
 import JoinMissionModal from './JoinMissionModal.jsx';
 
 function StarRating({ missionId, avgRating, ratingCount, canRate, onRated }) {
@@ -62,8 +62,8 @@ export function MissionCard({ mission, onUpdate, compact = false }) {
   const [showJoinModal, setShowJoinModal] = useState(false);
 
   const isCreator = user?.id === mission.creator_id;
-  const isGM = user?.role === 'GM';
-  const canManage = isCreator || isGM;
+  const userIsGM = isGM(user);
+  const canManage = isCreator || userIsGM;
 
   const playerCount = parseInt(mission.player_count) || 0;
   const reserveCount = parseInt(mission.reserve_count) || 0;

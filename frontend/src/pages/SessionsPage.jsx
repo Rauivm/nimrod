@@ -27,7 +27,7 @@ import {
   CheckCircle, Lock, Copy, Check,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
-import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAuth, isGM, isGMPrincipal as isGMPrincipalFn } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1185,11 +1185,11 @@ function GhostBtn({ children, ...props }) {
 
 export default function SessionsPage() {
   const { user }                          = useAuth();
-  const isGMPrincipal                     = user?.role === 'GM_PRINCIPAL';
-  const isGM                              = user?.role === 'GM' || isGMPrincipal;
+  const isGMPrincipal                     = isGMPrincipalFn(user);
+  const isGMRole                          = isGM(user);
 
   // Guarda de role — mostra tela de acesso negado para PLAYER
-  if (!isGM) {
+  if (!isGMRole) {
     return (
       <div style={{
         display: 'flex', flexDirection: 'column', alignItems: 'center',
