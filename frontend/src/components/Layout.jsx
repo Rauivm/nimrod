@@ -1,26 +1,20 @@
 import { Outlet, NavLink } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useAuth, roleLabel, isGM, isGMPrincipal } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
-import { api } from '../lib/api.js';
 import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil, UserCircle, BookOpen } from 'lucide-react';
 import EditDisplayNameModal from './EditDisplayNameModal.jsx';
 
+import { useFoundryLaunch } from '../hooks/useFoundryLaunch.js';
+
 function FoundryButton({ user }) {
-  const [foundryUrl, setFoundryUrl] = useState(null);
-
-  useEffect(() => {
-    api.get('/config').then(d => setFoundryUrl(d.foundryUrl)).catch(() => {});
-  }, []);
-
-  if (!foundryUrl) return null;
-
+  const { launch, loading } = useFoundryLaunch();
   const label = isGM(user) ? 'Iniciar Aventura' : 'Entrar na Aventura';
 
   return (
-    <button onClick={() => window.open(foundryUrl, '_blank')} className="foundry-btn" title={foundryUrl}>
+    <button onClick={launch} disabled={loading} className="foundry-btn">
       <Sword size={15} strokeWidth={2.5} />
-      <span>{label}</span>
+      <span>{loading ? 'Abrindo…' : label}</span>
       <ExternalLink size={11} style={{ opacity: 0.6 }} />
     </button>
   );

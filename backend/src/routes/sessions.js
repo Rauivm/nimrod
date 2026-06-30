@@ -4,14 +4,16 @@
  * Módulo de log de sessões e rastreamento de recursos por jogador.
  *
  * Endpoints:
- *   POST   /sessions                    — GM_PRINCIPAL: abre uma nova sessão
- *   GET    /sessions                    — GM/GM_PRINCIPAL: lista sessões
- *   GET    /sessions/:id                — GM/GM_PRINCIPAL: detalhes de uma sessão
- *   POST   /sessions/:id/close         — GM_PRINCIPAL: fecha a sessão
- *   POST   /sessions/:id/events        — GM/GM_PRINCIPAL: registra evento de recurso
- *   GET    /sessions/:id/events        — GM/GM_PRINCIPAL: lista eventos da sessão
- *   PATCH  /sessions/:id/events/:eid   — GM_PRINCIPAL: edita evento (com razão)
- *   DELETE /sessions/:id/events/:eid   — GM_PRINCIPAL: cancela evento (soft delete)
+ *   POST   /sessions/:id/link-foundry          — GM/narrador: vincula sessão ao handshake Foundry
+ *   POST   /sessions                           — GM_PRINCIPAL: abre uma nova sessão
+ *   GET    /sessions                           — GM/GM_PRINCIPAL: lista sessões
+ *   GET    /sessions/:id                       — GM/GM_PRINCIPAL: detalhes de uma sessão
+ *   GET    /sessions/:id/narrator-access       — qualquer autenticado: verifica se é narrador
+ *   POST   /sessions/:id/close                 — GM_PRINCIPAL: fecha a sessão
+ *   POST   /sessions/:id/events               — GM/GM_PRINCIPAL/narrador: registra evento
+ *   GET    /sessions/:id/events               — GM/GM_PRINCIPAL: lista eventos da sessão
+ *   PATCH  /sessions/:id/events/:eid           — GM_PRINCIPAL: edita evento (com razão)
+ *   DELETE /sessions/:id/events/:eid           — GM_PRINCIPAL: cancela evento (soft delete)
  *
  * Guards de role:
  *   isGM          → role IN ('GM', 'GM_PRINCIPAL')
@@ -185,6 +187,121 @@ function validateEventBody(body, reply) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function sessionRoutes(fastify) {
+
+  // ── POST /sessions/:id/link-foundry ───────────────────────────────────────
+  // Vincula uma sessão aberta a um handshake do Foundry via código curto.
+  // Chamado pelo frontend Nimrod quando o GM digita o código exibido no Foundry.
+  //
+  // Apenas GM e GM_PRINCIPAL que sejam narradores da sessão podem vincular.
+  //
+  // Body: { code }  (código de 7 caracteres gerado pelo módulo Foundry)
+  //
+  // Retorna:
+  //   200 { ok, sessionId, worldId, gmName, players, tokens }
+  //   400 código inválido / ausente / expirado / já usado
+  //   403 não é narrador desta sessão
+  //   404 sessão ou código não encontrado
+  fastify.post('/sessions/:id/link-foundry', async (req, reply) => {
+    if (!requireGM(req, reply)) return reply;
+
+    if (!isValidUuid(req.params.id)) {
+      return reply.code(400).send({ error: 'ID de sessão inválido.' });
+    }
+
+    const { code } = req.body ?? {};
+    if (!code?.trim()) {
+      return reply.code(400).send({ error: 'code é obrigatório.' });
+    }
+
+    const normalizedCode = code.trim().toUpperCase();
+
+    // Valida a sessão
+    const sessionRes = await query(
+      `SELECT id, status, narrator_ids, mission_id
+       FROM session_logs
+       WHERE id = $1 AND deleted_at IS NULL`,
+      [req.params.id],
+    );
+    if (!sessionRes.rows.length) {
+      return reply.code(404).send({ error: 'Sessão não encontrada.' });
+    }
+
+    const sl = sessionRes.rows[0];
+
+    if (sl.status !== 'open') {
+      return reply.code(400).send({ error: `Sessão está com status "${sl.status}" — só sessões abertas podem ser vinculadas.` });
+    }
+
+    // Apenas narradores da sessão (ou GM_PRINCIPAL) podem vincular
+    if (!isGMPrincipal(req.user) && !sl.narrator_ids.includes(req.user.id)) {
+      return reply.code(403).send({ error: 'Apenas narradores desta sessão podem vinculá-la ao Foundry.' });
+    }
+
+    // Busca o handshake — válido se não expirou e não foi claimado
+    const hsRes = await query(
+      `SELECT code, world_id, gm_name, players, tokens, expires_at, claimed_at, session_id
+       FROM foundry_handshakes
+       WHERE code = $1`,
+      [normalizedCode],
+    );
+
+    if (!hsRes.rows.length) {
+      return reply.code(400).send({ error: 'Código não encontrado. Verifique se está correto.' });
+    }
+
+    const hs = hsRes.rows[0];
+
+    if (new Date(hs.expires_at) < new Date()) {
+      return reply.code(400).send({ error: 'Código expirado. O módulo Foundry gera um novo código automaticamente ao inicializar.' });
+    }
+
+    if (hs.claimed_at) {
+      // Permite re-vincular à mesma sessão (idempotente) — útil se o GM refez o fluxo
+      if (hs.session_id === sl.id) {
+        return {
+          ok:        true,
+          sessionId: sl.id,
+          worldId:   hs.world_id,
+          gmName:    hs.gm_name,
+          players:   hs.players ?? [],
+          tokens:    hs.tokens  ?? [],
+          relinked:  true,
+        };
+      }
+      return reply.code(400).send({ error: 'Código já utilizado para outra sessão.' });
+    }
+
+    // Vincula: atualiza o handshake com session_id e claimed_at
+    await query(
+      `UPDATE foundry_handshakes
+       SET session_id = $1, claimed_at = NOW(), claimed_by = $2
+       WHERE code = $3`,
+      [sl.id, req.user.id, normalizedCode],
+    );
+
+    // Notifica via WS o módulo Foundry (que faz polling em /nimrod/handshake/status)
+    // e também os clientes Nimrod conectados (ex.: para mostrar ícone de vinculado)
+    broadcast('FOUNDRY_SESSION_LINKED', {
+      sessionId: sl.id,
+      worldId:   hs.world_id,
+      gmName:    hs.gm_name,
+      code:      normalizedCode,
+    });
+
+    req.log.info(
+      { sessionId: sl.id, code: normalizedCode, worldId: hs.world_id, userId: req.user.id },
+      'foundry session linked',
+    );
+
+    return {
+      ok:        true,
+      sessionId: sl.id,
+      worldId:   hs.world_id,
+      gmName:    hs.gm_name,
+      players:   hs.players ?? [],
+      tokens:    hs.tokens  ?? [],
+    };
+  });
 
   // ── GET /sessions/players-with-characters ─────────────────────────────────
   // Retorna todos os jogadores (PLAYER, GM, GM_PRINCIPAL) com seus personagens
@@ -461,6 +578,35 @@ export async function sessionRoutes(fastify) {
     return serializeSession(closed);
   });
 
+  // ── GET /sessions/:id/narrator-access ─────────────────────────────────────
+  // Endpoint leve para o módulo Foundry verificar se o usuário autenticado
+  // é narrador da sessão informada, mesmo que seja PLAYER.
+  //
+  // Qualquer usuário autenticado pode chamar. Retorna:
+  //   200 { narrator: true }   → usuário é narrador desta sessão (ou GM/GM_PRINCIPAL)
+  //   200 { narrator: false }  → usuário não é narrador desta sessão
+  //   404                      → sessão não encontrada
+  //
+  // Não expõe dados sigilosos da sessão (gmNotes, snapshots, eventos).
+  fastify.get('/sessions/:id/narrator-access', async (req, reply) => {
+    // Qualquer autenticado pode consultar (cfAuthMiddleware já garantiu req.user)
+    if (!req.user?.id) {
+      return reply.code(401).send({ error: 'Autenticação necessária.' });
+    }
+
+    const session = await fetchSession(req.params.id);
+    if (!session) return reply.code(404).send({ error: 'Sessão não encontrada.' });
+
+    // GM e GM_PRINCIPAL sempre têm acesso
+    if (isGM(req.user)) {
+      return { narrator: true };
+    }
+
+    // PLAYER: verifica se está na lista de narradores da sessão
+    const isNarrator = session.narrator_ids.includes(req.user.id);
+    return { narrator: isNarrator };
+  });
+
   // ── POST /sessions/:id/events ──────────────────────────────────────────────
   // Registra um evento de recurso em uma sessão aberta.
   // GM e GM_PRINCIPAL podem registrar. Foundry envia com source='foundry'.
@@ -519,8 +665,22 @@ export async function sessionRoutes(fastify) {
     if (!playerCheck.rows.length) {
       return reply.code(400).send({ error: 'playerId não encontrado.' });
     }
+    let participant = false;
 
     if (sl.mission_id) {
+      const participantCheck = await query(
+        `SELECT 1
+          FROM mission_participants
+          WHERE mission_id = $1
+            AND user_id = $2
+          LIMIT 1`,
+        [sl.mission_id, playerId],
+      );
+
+      participant = participantCheck.rows.length > 0;
+    }
+
+/*     if (sl.mission_id) {
       const participantCheck = await query(
         `SELECT 1
          FROM mission_participants
@@ -531,7 +691,7 @@ export async function sessionRoutes(fastify) {
       if (!participantCheck.rows.length) {
         return reply.code(403).send({ error: 'Jogador nÃ£o participa desta missÃ£o.' });
       }
-    }
+    } */
 
     // Resolve actorName: se characterId foi fornecido, valida e deriva o nome
     let resolvedActorName = req.body.actorName?.trim() ?? null;
@@ -600,10 +760,10 @@ export async function sessionRoutes(fastify) {
             resource_type, delta,
             value_before, value_after, delta_meta,
             description, foundry_event_id, occurred_at,
-            out_of_session, arc_id, mission_id, character_id)
+            out_of_session, arc_id, mission_id, character_id, participant)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
                  COALESCE($13::timestamptz, NOW()),
-                 FALSE, $14, $15, $16)
+                 FALSE, $14, $15, $16, $17)
          RETURNING *`,
         [
           req.params.id,
@@ -622,6 +782,7 @@ export async function sessionRoutes(fastify) {
           sl.arc_id     ?? null,
           sl.mission_id ?? null,
           resolvedCharacterId ?? null,
+          participant,
         ],
       );
     } catch (err) {

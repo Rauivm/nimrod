@@ -1,113 +1,398 @@
 /**
- * nimrod-bridge.js
+ * nimrod-bridge.js — Nimrod Bridge v3
  *
- * Foundry VTT module - Nimrod Identity Bridge.
+ * FLUXO:
+ *   1. GM abre o mundo → módulo inicializa
+ *   2. Verifica se há código salvo nas world settings (sessão já vinculada)
+ *   3. Se não: gera novo código via POST /nimrod/handshake e exibe no painel
+ *   4. Narrador copia o código e cola no Nimrod ao clicar "Iniciar campanha"
+ *   5. Nimrod chama POST /missions/:id/start com o código → vincula sessão
+ *   6. Módulo detecta via polling → ativa sync de eventos
+ *   7. Ao encerrar no Nimrod → expires_at = now → módulo para eventos
  *
- * Reads ?t=<jwt>, verifies it with Nimrod, activates the linked Nimrod session,
- * records presence, and opens the mapped actor sheet when available.
+ * CÓDIGO NÃO EXPIRA AUTOMATICAMENTE:
+ *   O código é válido durante toda a campanha. Se o Foundry reiniciar,
+ *   o mesmo código é reutilizado (lido das world settings).
+ *   Só é invalidado quando o narrador encerra a campanha no Nimrod.
  */
 
-const MODULE_ID = 'nimrod-bridge';
+const MODULE_ID  = 'nimrod-bridge';
+const POLL_MS    = 5_000;
+const STATUS_CHECK_MS = 30_000;
 
-function contextValue(ctx, longKey, shortKey) {
-  return ctx?.[longKey] ?? ctx?.[shortKey] ?? null;
+// ─── Settings ────────────────────────────────────────────────────────────────
+
+Hooks.once('init', () => {
+  game.settings.register(MODULE_ID, 'nimrodUrl', {
+    name: 'URL do Nimrod', hint: 'Ex: https://nimrod.meusite.com',
+    scope: 'world', config: true, type: String, default: '',
+  });
+  game.settings.register(MODULE_ID, 'nimrodApiKey', {
+    name: 'API Key do Nimrod', hint: 'Chave FOUNDRY_API_KEY do servidor Nimrod.',
+    scope: 'world', config: true, type: String, default: '',
+  });
+  // Código atual — persiste entre reloads do mundo
+  game.settings.register(MODULE_ID, 'handshakeCode', {
+    name: 'Código de handshake (auto)', scope: 'world', config: false, type: String, default: '',
+  });
+  // SessionId ativo — propagado ao nimrod-session
+  game.settings.register(MODULE_ID, 'activeSessionId', {
+    name: 'Sessão Ativa (auto)', scope: 'world', config: false, type: String, default: '',
+  });
+});
+
+// ─── Estado ───────────────────────────────────────────────────────────────────
+
+const State = {
+  code:        null,
+  sessionId:   null,
+  linked:      false,
+  pollTimer:   null,
+  watchTimer:  null,
+  panel:       null,
+};
+
+// ─── HTTP ─────────────────────────────────────────────────────────────────────
+
+const base = () => (game.settings.get(MODULE_ID, 'nimrodUrl') ?? '').replace(/\/$/, '');
+const key  = () => game.settings.get(MODULE_ID, 'nimrodApiKey') ?? '';
+const hdrs = () => ({ 'Content-Type': 'application/json', 'X-Nimrod-Key': key() });
+
+async function nPost(path, body) {
+  const res = await fetch(`${base()}${path}`, { method: 'POST', headers: hdrs(), body: JSON.stringify(body) });
+  if (!res.ok) { const e = await res.json().catch(() => ({ error: res.statusText })); throw new Error(e.error ?? `HTTP ${res.status}`); }
+  return res.json();
 }
 
-async function postPresence(path, token, ctx) {
-  const activeSessionId = ctx?.activeSessionId || ctx?.sessionId || null;
-  if (!token || !activeSessionId) return;
-
-  const actorName = contextValue(ctx, 'actor', 'a') || ctx.actorName || null;
-  try {
-    await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token,
-        actorName,
-        characterId: ctx.characterId ?? null,
-      }),
-      keepalive: path.endsWith('/leave'),
-    });
-  } catch (err) {
-    console.warn(`[${MODULE_ID}] Session presence sync failed (${path}):`, err);
-  }
+async function nGet(path) {
+  const res = await fetch(`${base()}${path}`, { headers: hdrs() });
+  if (!res.ok) { const e = await res.json().catch(() => ({ error: res.statusText })); throw new Error(e.error ?? `HTTP ${res.status}`); }
+  return res.json();
 }
 
-Hooks.once('ready', async () => {
-  const params = new URLSearchParams(window.location.search);
-  const token = params.get('t');
+// ─── Painel UI ────────────────────────────────────────────────────────────────
 
-  if (!token) return;
+function renderPanel() {
+  if (!game.user.isGM) return;
+  State.panel?.remove();
 
-  try {
-    params.delete('t');
-    const clean = params.toString()
-      ? `${window.location.pathname}?${params.toString()}`
-      : window.location.pathname;
-    window.history.replaceState({}, document.title, clean);
-  } catch {
-    // Token cleanup is best-effort.
+  const panel = document.createElement('div');
+  panel.id = 'nb-panel';
+
+  if (State.linked) {
+    panel.innerHTML = `
+      <div class="nb-row">
+        <span class="nb-icon">🔗</span>
+        <div class="nb-info">
+          <div class="nb-label">Nimrod vinculado</div>
+          <div class="nb-sub">${State.sessionId?.slice(0,8)}…</div>
+        </div>
+        <button class="nb-x" title="Fechar">×</button>
+      </div>`;
+  } else {
+    const code = State.code ?? '–';
+    panel.innerHTML = `
+      <div class="nb-header">
+        <span class="nb-icon">🎲</span>
+        <span class="nb-label">Nimrod — Código</span>
+        <button class="nb-x" title="Fechar">×</button>
+      </div>
+      <div class="nb-code-row">
+        <span class="nb-code" id="nb-code-text">${code}</span>
+        <button class="nb-copy" title="Copiar código" id="nb-copy-btn">📋</button>
+      </div>
+      <div class="nb-hint">Cole este código no Nimrod ao iniciar a campanha</div>
+      <div class="nb-actions">
+        <button class="nb-btn" id="nb-new-btn">↺ Novo código</button>
+      </div>
+      <div class="nb-divider"></div>
+      <div class="nb-sub" style="margin-bottom:4px">Ou informe um código existente:</div>
+      <div class="nb-row-gap">
+        <input id="nb-manual-input" class="nb-input" placeholder="XXXXXXX" maxlength="7" />
+        <button class="nb-btn" id="nb-use-btn">Usar</button>
+      </div>`;
   }
 
-  let ctx;
-  try {
-    const res = await fetch('/nimrod/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
-    });
+  const style = document.createElement('style');
+  style.id = 'nb-style';
+  style.textContent = `
+    #nb-panel { position:fixed; bottom:16px; right:16px; z-index:9999; background:#1a1008; border:1px solid #7a5c18; border-radius:8px; padding:12px 14px; box-shadow:0 8px 32px rgba(0,0,0,.7); font-family:sans-serif; color:#e8c870; width:240px; user-select:none; }
+    #nb-panel .nb-header { display:flex; align-items:center; gap:6px; margin-bottom:8px; }
+    #nb-panel .nb-row { display:flex; align-items:center; gap:10px; }
+    #nb-panel .nb-row-gap { display:flex; gap:6px; align-items:center; }
+    #nb-panel .nb-icon { font-size:18px; flex-shrink:0; }
+    #nb-panel .nb-label { font-size:12px; font-weight:700; letter-spacing:1px; text-transform:uppercase; flex:1; }
+    #nb-panel .nb-info { flex:1; }
+    #nb-panel .nb-sub { font-size:11px; color:#a08040; }
+    #nb-panel .nb-hint { font-size:11px; color:#a08040; text-align:center; margin:4px 0; }
+    #nb-panel .nb-code-row { display:flex; align-items:center; justify-content:center; gap:8px; background:rgba(255,255,255,.04); border-radius:4px; padding:6px 8px; margin-bottom:4px; }
+    #nb-panel .nb-code { font-size:28px; font-weight:900; letter-spacing:6px; font-family:'Courier New',monospace; color:#f0d080; }
+    #nb-panel .nb-copy { background:rgba(122,92,24,.2); border:1px solid #7a5c18; color:#c9a84c; border-radius:4px; padding:4px 7px; cursor:pointer; font-size:14px; transition:background .15s; }
+    #nb-panel .nb-copy:hover { background:rgba(122,92,24,.4); }
+    #nb-panel .nb-copy.nb-copied { color:#4a9a6a; }
+    #nb-panel .nb-actions { display:flex; gap:6px; justify-content:center; margin:6px 0 2px; }
+    #nb-panel .nb-btn { background:rgba(122,92,24,.2); border:1px solid #7a5c18; color:#c9a84c; font-size:11px; padding:4px 10px; border-radius:4px; cursor:pointer; transition:background .15s; }
+    #nb-panel .nb-btn:hover { background:rgba(122,92,24,.4); }
+    #nb-panel .nb-divider { border:none; border-top:1px solid #3a2810; margin:8px 0 6px; }
+    #nb-panel .nb-input { flex:1; background:#2a1a08; border:1px solid #7a5c18; color:#e8c870; border-radius:4px; padding:4px 8px; font-size:13px; font-family:'Courier New',monospace; letter-spacing:2px; text-transform:uppercase; outline:none; }
+    #nb-panel .nb-x { background:none; border:none; color:#806040; font-size:18px; cursor:pointer; padding:0; margin-left:auto; line-height:1; }
+    #nb-panel .nb-x:hover { color:#e8c870; }
+  `;
 
-    if (!res.ok) {
-      console.warn(`[${MODULE_ID}] Token verification failed: ${res.status}`);
+  document.getElementById('nb-style')?.remove();
+  document.head.appendChild(style);
+  document.body.appendChild(panel);
+  State.panel = panel;
+
+  // Eventos
+  panel.querySelector('.nb-x')?.addEventListener('click', () => panel.remove());
+
+  const copyBtn = panel.querySelector('#nb-copy-btn');
+  if (copyBtn && State.code) {
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(State.code);
+        copyBtn.textContent = '✅';
+        copyBtn.classList.add('nb-copied');
+        setTimeout(() => { copyBtn.textContent = '📋'; copyBtn.classList.remove('nb-copied'); }, 2000);
+      } catch { copyBtn.title = 'Copie manualmente: ' + State.code; }
+    });
+  }
+
+  panel.querySelector('#nb-new-btn')?.addEventListener('click', () => initiateHandshake(true));
+
+  const useBtn = panel.querySelector('#nb-use-btn');
+  useBtn?.addEventListener('click', async () => {
+    const input = panel.querySelector('#nb-manual-input');
+    const val = input?.value?.trim().toUpperCase();
+    if (!val || val.length < 4) return;
+    await setCodeAndSave(val);
+    startPolling();
+    renderPanel();
+  });
+
+  panel.querySelector('#nb-manual-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') useBtn?.click();
+  });
+}
+
+// ─── Gestão do código ─────────────────────────────────────────────────────────
+
+async function setCodeAndSave(code) {
+  State.code = code;
+  try { await game.settings.set(MODULE_ID, 'handshakeCode', code); } catch {}
+}
+
+async function initiateHandshake(forceNew = false) {
+  if (!game.user.isGM) return;
+  if (!base() || !key()) {
+    ui.notifications?.warn(`[${MODULE_ID}] Configure URL e API Key nas Configurações do Módulo.`);
+    renderPanel(); return;
+  }
+
+  // Se já há código salvo nas settings e não forçando novo, reutiliza
+  if (!forceNew) {
+    const saved = game.settings.get(MODULE_ID, 'handshakeCode') || '';
+    if (saved) {
+      State.code = saved;
+      console.info(`%c[${MODULE_ID}] Reutilizando código salvo: ${saved}`, 'color:#c9a84c');
+      renderPanel();
+      startPolling();
       return;
     }
+  }
 
-    ctx = await res.json();
+  // Para polling anterior
+  if (State.pollTimer) { clearInterval(State.pollTimer); State.pollTimer = null; }
+
+  try {
+    const worldState = collectWorld();
+    const data = await nPost('/nimrod/handshake', worldState);
+    await setCodeAndSave(data.code);
+    console.info(`%c[${MODULE_ID}] Novo código: ${data.code}`, 'color:#c9a84c;font-weight:bold');
+    renderPanel();
+    startPolling();
   } catch (err) {
-    console.error(`[${MODULE_ID}] Network error during token verification:`, err);
-    return;
+    console.error(`[${MODULE_ID}] Handshake falhou:`, err.message);
+    ui.notifications?.error(`[${MODULE_ID}] Falha ao conectar ao Nimrod: ${err.message}`);
+    renderPanel();
   }
+}
 
-  const email = contextValue(ctx, 'email', 'e');
-  const role = contextValue(ctx, 'role', 'r');
-  const world = contextValue(ctx, 'world', 'w');
-  const actorName = contextValue(ctx, 'actor', 'a') || ctx.actorName || null;
-  const activeSessionId = ctx.activeSessionId || ctx.sessionId || null;
+function collectWorld() {
+  const players = (game.users ?? []).filter(u => u.active).map(u => ({
+    foundryUserId: u.id, foundryName: u.name, isGM: u.isGM,
+    characterName: u.character?.name ?? null, actorId: u.character?.id ?? null,
+    hp: u.character?.system?.attributes?.hp?.value ?? null,
+  }));
+  const tokens = (canvas?.tokens?.placeables ?? []).map(t => ({
+    tokenId: t.id, actorId: t.actor?.id ?? null, actorName: t.actor?.name ?? t.name,
+    hp: t.actor?.system?.attributes?.hp?.value ?? null, isPC: t.actor?.type === 'character',
+  }));
+  return { worldId: game.world?.id ?? 'unknown', gmName: game.user?.name ?? null, players, tokens };
+}
 
-  console.info(`[${MODULE_ID}] Verified identity: ${email} (${role}) -> world: ${world}`);
+// ─── Polling ─────────────────────────────────────────────────────────────────
 
-  if (activeSessionId && game.settings?.settings?.has('nimrod-session.activeSessionId')) {
+async function pollStatus() {
+  if (!State.code || State.linked) return;
+  try {
+    const data = await nGet(`/nimrod/handshake/status?code=${encodeURIComponent(State.code)}`);
+    if (data.linked && data.sessionId) onLinked(data.sessionId);
+  } catch (err) {
+    // 404 pode significar código inválido — não para o polling (pode ter sido
+    // gerado um novo código no servidor)
+    if (err.message.includes('404')) {
+      console.warn(`[${MODULE_ID}] Código não encontrado no servidor. Gere um novo se necessário.`);
+    }
+  }
+}
+
+function startPolling() {
+  if (State.pollTimer) clearInterval(State.pollTimer);
+  State.pollTimer = setInterval(pollStatus, POLL_MS);
+}
+
+// ─── Vinculação ───────────────────────────────────────────────────────────────
+
+async function onLinked(sessionId) {
+  clearInterval(State.pollTimer); State.pollTimer = null;
+  State.linked = true; State.sessionId = sessionId;
+  console.info(`%c[${MODULE_ID}] ✅ Sessão vinculada: ${sessionId}`, 'color:#4a9a6a;font-weight:bold');
+
+  try {
+    if (game.settings.settings?.has('nimrod-session.activeSessionId')) {
+      await game.settings.set('nimrod-session', 'activeSessionId', sessionId);
+    }
+    await game.settings.set(MODULE_ID, 'activeSessionId', sessionId);
+  } catch {}
+
+  renderPanel();
+  ui.notifications?.info(`[${MODULE_ID}] Sessão Nimrod vinculada!`);
+  await syncPresence(sessionId);
+  registerPresenceHooks(sessionId);
+  startSessionWatcher(sessionId);
+}
+
+// ─── Presença ────────────────────────────────────────────────────────────────
+
+async function sendPresence(sessionId, type, user, actor) {
+  if (!base() || !key() || !sessionId) return;
+  try {
+    await fetch(`${base()}/nimrod/session/presence`, {
+      method: 'POST', headers: hdrs(), keepalive: type === 'leave',
+      body: JSON.stringify({
+        sessionId, eventType: type,
+        foundryUserId: user.id, foundryName: user.name,
+        characterName: actor?.name ?? null, actorId: actor?.id ?? null,
+        hp: actor?.system?.attributes?.hp?.value ?? null,
+        occurredAt: new Date().toISOString(),
+      }),
+    });
+  } catch (e) { console.warn(`[${MODULE_ID}] Presença (${type}):`, e.message); }
+}
+
+async function syncPresence(sessionId) {
+  for (const u of (game.users ?? [])) {
+    if (!u.active) continue;
+    await sendPresence(sessionId, 'enter', u, u.character);
+  }
+}
+
+function registerPresenceHooks(sessionId) {
+  Hooks.on('userConnected', async (user, connected) => {
+    if (!State.linked || State.sessionId !== sessionId) return;
+    await sendPresence(sessionId, connected ? 'enter' : 'leave', user, user.character);
+  });
+  Hooks.on('updateUser', async (user, changes) => {
+    if (!State.linked || State.sessionId !== sessionId || !('character' in (changes ?? {}))) return;
+    const actor = game.actors?.get(changes.character);
+    await sendPresence(sessionId, 'reconnect', user, actor ?? null);
+  });
+  window.addEventListener('beforeunload', () => {
+    sendPresence(sessionId, 'leave', game.user, game.user?.character ?? null);
+    // Limpa settings ao sair (sessão encerrada externamente)
+    // Mantém o código — pode ser reutilizado na próxima abertura
+  }, { once: true });
+}
+
+// ─── Watcher de encerramento ─────────────────────────────────────────────────
+
+function startSessionWatcher(sessionId) {
+  if (State.watchTimer) clearInterval(State.watchTimer);
+  State.watchTimer = setInterval(async () => {
+    if (!State.linked || State.sessionId !== sessionId) { clearInterval(State.watchTimer); return; }
     try {
-      await game.settings.set('nimrod-session', 'activeSessionId', activeSessionId);
-      console.info(`[${MODULE_ID}] Active Nimrod session set: ${activeSessionId}`);
-    } catch (err) {
-      console.warn(`[${MODULE_ID}] Could not set nimrod-session activeSessionId:`, err);
-    }
-  }
+      const data = await nGet(`/nimrod/session/status?sessionId=${sessionId}`);
+      if (data.status === 'closed') {
+        clearInterval(State.watchTimer);
+        onSessionClosed(sessionId);
+      }
+    } catch { /* silencioso */ }
+  }, STATUS_CHECK_MS);
+}
 
-  if (activeSessionId) {
-    await postPresence('/nimrod/session/enter', token, ctx);
-    window.addEventListener('beforeunload', () => {
-      postPresence('/nimrod/session/leave', token, ctx);
-    }, { once: true });
+function onSessionClosed(sessionId) {
+  console.info(`%c[${MODULE_ID}] Sessão encerrada pelo Nimrod.`, 'color:#c04040');
+  State.linked = false; State.sessionId = null;
+  // Limpa código salvo — campanha encerrada
+  game.settings.set(MODULE_ID, 'handshakeCode', '').catch(() => {});
+  game.settings.set(MODULE_ID, 'activeSessionId', '').catch(() => {});
+  if (game.settings.settings?.has('nimrod-session.activeSessionId')) {
+    game.settings.set('nimrod-session', 'activeSessionId', '').catch(() => {});
   }
+  ui.notifications?.warn(`[${MODULE_ID}] A campanha foi encerrada pelo narrador no Nimrod.`);
+  State.code = null;
+  renderPanel();
+}
 
-  if (world && game.world?.id && world !== game.world.id) {
-    console.warn(
-      `[${MODULE_ID}] Token world "${world}" differs from current world "${game.world.id}". Skipping actor selection.`,
-    );
+// ─── Entry point ──────────────────────────────────────────────────────────────
+
+Hooks.once('ready', async () => {
+  if (!game.user.isGM) {
+    console.info(`[${MODULE_ID}] Não é GM — aguardando sessionId do GM.`);
     return;
   }
 
-  if (actorName) {
-    const actor = game.actors?.find(a => a.name === actorName);
-
-    if (actor) {
-      actor.sheet.render(true);
-      console.info(`[${MODULE_ID}] Opened actor sheet: ${actorName}`);
-    } else {
-      console.warn(`[${MODULE_ID}] Actor "${actorName}" not found in this world.`);
-    }
+  if (!base() || !key()) {
+    console.info(`[${MODULE_ID}] URL/API Key não configuradas — aguardando configuração.`);
+    State.linked = false;
+    renderPanel();
+    return;
   }
+
+  // Verifica se há sessão salva — mas NÃO confia cegamente: valida contra o
+  // backend antes de marcar como vinculada. Uma setting "presa" de uma sessão
+  // já encerrada não deve fazer o módulo abrir já como "vinculado".
+  const savedSession = game.settings.get(MODULE_ID, 'activeSessionId') || '';
+  const savedCode     = game.settings.get(MODULE_ID, 'handshakeCode')    || '';
+
+  if (savedSession) {
+    try {
+      const data = await nGet(`/nimrod/session/status?sessionId=${savedSession}`);
+      if (data.status === 'open') {
+        // Sessão realmente ainda aberta no Nimrod — restaura normalmente
+        State.linked    = true;
+        State.sessionId = savedSession;
+        State.code      = savedCode || null;
+        console.info(`%c[${MODULE_ID}] Sessão ativa restaurada: ${savedSession}`, 'color:#4a9a6a');
+        renderPanel();
+        await syncPresence(savedSession);
+        registerPresenceHooks(savedSession);
+        startSessionWatcher(savedSession);
+        return;
+      }
+      console.info(`[${MODULE_ID}] Sessão salva (${savedSession}) não está mais aberta (status: ${data.status}) — limpando e reiniciando handshake.`);
+    } catch (err) {
+      console.warn(`[${MODULE_ID}] Não foi possível validar sessão salva: ${err.message} — limpando e reiniciando handshake.`);
+    }
+
+    // Sessão salva é inválida/encerrada — limpa o estado preso
+    await game.settings.set(MODULE_ID, 'activeSessionId', '').catch(() => {});
+    State.linked    = false;
+    State.sessionId = null;
+  }
+
+  console.info(`%c[${MODULE_ID}] Inicializando handshake…`, 'color:#c9a84c;font-weight:bold');
+  await initiateHandshake(false);
 });

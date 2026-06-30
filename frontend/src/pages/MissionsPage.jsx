@@ -8,6 +8,7 @@ const FILTERS = [
   { label: 'Missões',    value: 'MISSION', field: 'kind'   },
   { label: 'Avisos',     value: 'NOTICE',  field: 'kind'   },
   { label: 'Abertas',    value: 'OPEN',    field: 'status' },
+  { label: 'Em andamento', value: 'RUNNING', field: 'status' },
   { label: 'Fechadas',   value: 'CLOSED',  field: 'status' },
   { label: 'Concluídas', value: 'FINISHED',field: 'status' },
   { label: 'Todas',      value: '',        field: ''       },

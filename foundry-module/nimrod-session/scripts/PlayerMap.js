@@ -1,18 +1,18 @@
 /**
  * scripts/PlayerMap.js
  *
- * Mapeia userId do Foundry → playerId do Nimrod (UUID do banco).
+ * Mapeia actorId do Foundry → playerId do Nimrod. (UUID do banco).
  *
  * O mapeamento é configurado manualmente pelo GM nas configurações
  * do módulo e armazenado como JSON em game.settings (scope: "world").
  *
  * Estrutura do mapa:
- *   { [foundryUserId]: { nimrodId: string, displayName: string } }
+ *   { [foundryActorId]: { nimrodId: string, actorName: string } }
  *
  * API pública:
  *   PlayerMap.getNimrodId(actor)   → string | null
  *   PlayerMap.getAll()             → mapa completo
- *   PlayerMap.set(foundryUserId, nimrodId, displayName)
+ *   PlayerMap.set(foundryActorId, nimrodId, actorName)
  *   PlayerMap.remove(foundryUserId)
  *   PlayerMap.autoDiscover()       → tenta descobrir via /api/users
  */
@@ -25,7 +25,7 @@ export class PlayerMap {
   // ─── Leitura ─────────────────────────────────────────────────────────────────
 
   /**
-   * Retorna o mapa completo { foundryUserId → { nimrodId, displayName } }.
+   * Retorna o mapa completo { foundryActorId → { nimrodId, actorName } }.
    */
   static getAll() {
     try {
@@ -40,7 +40,7 @@ export class PlayerMap {
    * @param {Actor} actor
    * @returns {string | null}
    */
-  static getNimrodId(actor) {
+/*   static getNimrodId(actor) {
     const map = this.getAll();
 
     // Tenta primeiro pelo userId explícito no flag do módulo
@@ -58,12 +58,20 @@ export class PlayerMap {
     }
 
     return null;
+  } */
+
+  static getNimrodId(actor) {
+    if (!actor) return null;
+
+    const map = this.getAll();
+
+    return map[actor.id]?.nimrodId ?? null;
   }
 
   /**
    * Retorna o displayName do jogador mapeado, ou o nome do ator como fallback.
    */
-  static getDisplayName(actor) {
+/*   static getDisplayName(actor) {
     const map = this.getAll();
     const ownership = actor.ownership ?? {};
     for (const [userId, level] of Object.entries(ownership)) {
@@ -72,39 +80,60 @@ export class PlayerMap {
       if (map[userId]?.displayName) return map[userId].displayName;
     }
     return actor.name;
+  } */
+
+  static getDisplayName(actor) {
+    if (!actor) return null;
+
+    const map = this.getAll();
+
+    return map[actor.id]?.actorName ?? actor.name;
   }
 
-  // ─── Escrita ─────────────────────────────────────────────────────────────────
+/**
+ * Adiciona ou atualiza um mapeamento.
+ *
+ * @param {string} foundryActorId
+ * @param {string} nimrodId
+ * @param {string} actorName
+ */
+  static async set(foundryActorId, nimrodId, actorName) {
+    if (!game.user?.isGM) {
+      throw new Error("PlayerMap.set: apenas GMs podem alterar o mapeamento.");
+    }
 
-  /**
-   * Adiciona ou atualiza um mapeamento.
-   *
-   * @param {string} foundryUserId
-   * @param {string} nimrodId       - UUID do usuário no banco Nimrod
-   * @param {string} [displayName]  - Nome de exibição (fallback para username do Foundry)
-   */
-  static async set(foundryUserId, nimrodId, displayName) {
-    if (!game.user?.isGM) throw new Error("PlayerMap.set: apenas GMs podem alterar o mapeamento.");
     const map = this.getAll();
-    map[foundryUserId] = {
+
+    map[foundryActorId] = {
       nimrodId,
-      displayName: displayName ?? game.users.get(foundryUserId)?.name ?? foundryUserId,
+      actorName,
     };
+
     await game.settings.set(MODULE_ID, SETTING_ID, map);
-    console.log(`nimrod-session | PlayerMap: ${foundryUserId} → ${nimrodId} (${displayName})`);
+
+    console.log(
+      `nimrod-session | PlayerMap: ${actorName} (${foundryActorId}) → ${nimrodId}`
+    );
   }
 
   /**
    * Remove um mapeamento.
    */
-  static async remove(foundryUserId) {
-    if (!game.user?.isGM) throw new Error("PlayerMap.remove: apenas GMs podem alterar o mapeamento.");
-    const map = this.getAll();
-    delete map[foundryUserId];
-    await game.settings.set(MODULE_ID, SETTING_ID, map);
-    console.log(`nimrod-session | PlayerMap: ${foundryUserId} removido.`);
-  }
+  static async remove(foundryActorId) {
+    if (!game.user?.isGM) {
+      throw new Error("PlayerMap.remove: apenas GMs podem alterar o mapeamento.");
+    }
 
+    const map = this.getAll();
+
+    delete map[foundryActorId];
+
+    await game.settings.set(MODULE_ID, SETTING_ID, map);
+
+    console.log(
+      `nimrod-session | PlayerMap: actor ${foundryActorId} removido.`
+    );
+  }
   // ─── Auto-descoberta ──────────────────────────────────────────────────────────
 
   /**
@@ -117,7 +146,8 @@ export class PlayerMap {
    */
   static async autoDiscover() {
     const baseUrl = game.settings.get(MODULE_ID, "nimrodUrl")?.replace(/\/$/, "") ?? "";
-    const token   = game.settings.get(MODULE_ID, "nimrodToken") ?? "";
+    //const token   = game.settings.get(MODULE_ID, "nimrodToken") ?? "";
+    const apiKey = game.settings.get(MODULE_ID, "nimrodApiKey") ?? "";
 
     if (!baseUrl) {
       console.warn("nimrod-session | autoDiscover: URL não configurada.");
@@ -129,7 +159,8 @@ export class PlayerMap {
       const res = await fetch(`${baseUrl}/api/users`, {
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          //...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(apiKey ? { "X-Nimrod-Key": apiKey } : {})
         },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -143,23 +174,32 @@ export class PlayerMap {
     let   mapped    = 0;
     const unmapped  = [];
 
-    // Para cada usuário do Foundry (não-GM) tenta encontrar correspondência no Nimrod
-    for (const fUser of game.users) {
-      if (fUser.isGM)               continue;
-      if (map[fUser.id]?.nimrodId)  continue; // já mapeado
+    // Para cada personagem do Foundry tenta encontrar o personagem no Nimrod
+    for (const actor of game.actors) {
+      if (!actor.hasPlayerOwner) continue;
 
-      // Tenta match por displayName (case-insensitive)
-      const match = nimrodUsers.find(
-        nu => nu.displayName?.toLowerCase() === fUser.name?.toLowerCase()
-           || nu.name?.toLowerCase()         === fUser.name?.toLowerCase(),
+      if (map[actor.id]?.nimrodId) continue;
+
+      const match = nimrodUsers.find(user =>
+          user.role === "PLAYER" &&
+          user.characters?.some(character =>
+              character.name?.toLowerCase() === actor.name?.toLowerCase()
+          )
       );
 
       if (match) {
-        map[fUser.id] = { nimrodId: match.id, displayName: match.displayName ?? match.name };
-        mapped++;
-        console.log(`nimrod-session | autoDiscover: ${fUser.name} → ${match.id}`);
+          map[actor.id] = {
+              nimrodId: match.id,
+              actorName: actor.name,
+          };
+
+          mapped++;
+
+          console.log(
+              `nimrod-session | autoDiscover: ${actor.name} → ${match.id}`
+          );
       } else {
-        unmapped.push(fUser.name);
+          unmapped.push(actor.name);
       }
     }
 
@@ -170,7 +210,9 @@ export class PlayerMap {
     const msg = `autoDiscover: ${mapped} mapeados, ${unmapped.length} sem correspondência${unmapped.length ? ` (${unmapped.join(", ")})` : ""}.`;
     console.log(`%cnimrod-session | ${msg}`, "color:#4a9a6a");
     if (unmapped.length > 0) {
-      ui.notifications.warn(`nimrod-session | ${unmapped.length} jogador(es) sem mapeamento: ${unmapped.join(", ")}`);
+      ui.notifications.warn(
+          `nimrod-session | ${unmapped.length} personagem(ns) sem mapeamento: ${unmapped.join(", ")}`
+      );
     }
 
     return { mapped, unmapped };

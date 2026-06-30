@@ -107,10 +107,14 @@ fastify.addHook('onRequest', async (req, reply) => {
     path === '/config'              ||
     path === '/ws'                  ||
     path.startsWith('/uploads/')    ||
-    path === '/nimrod/verify'       ||
-    path === '/nimrod/session/enter' ||
-    path === '/nimrod/session/leave' ||
-    path === '/foundry/push-actors'   // autenticado por X-Nimrod-Key na rota
+    path === '/nimrod/verify'           ||
+    path === '/nimrod/handshake'        ||
+    path === '/nimrod/handshake/status' ||
+    path === '/nimrod/session/presence' ||
+    path === '/nimrod/session/status'   ||
+    path === '/nimrod/session/enter'    ||
+    path === '/nimrod/session/leave'    ||
+    path === '/foundry/push-actors'       // autenticado por X-Nimrod-Key na rota
   ) return;
 
   await cfAuthMiddleware(req, reply);

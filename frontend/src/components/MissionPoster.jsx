@@ -1,11 +1,108 @@
 import { memo, useCallback, useEffect, useState, useMemo } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Users, Calendar, Coins, Edit3, Trash2, X, Check, UserPlus, ChevronDown, ChevronUp, Scroll, PlayCircle, Dice5, Clock3 } from 'lucide-react';
+import { Users, Calendar, Coins, Edit3, Trash2, X, Check, UserPlus, ChevronDown, ChevronUp, Scroll, PlayCircle, Dice5, Clock3, Link, Monitor, Copy } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth, isGM, isGMPrincipal, roleLabel } from '../contexts/AuthContext.jsx';
 import JoinMissionModal from './JoinMissionModal.jsx';
 import { useFoundryLaunch } from '../hooks/useFoundryLaunch.js';
+
+// ── StartCampaignModal ─────────────────────────────────────────────────────────
+// Exibido ao narrador ao clicar "Iniciar campanha".
+// Instrui sobre o código do Foundry e inicia a campanha com um único clique.
+function StartCampaignModal({ missionId, missionTitle, onClose, onStarted }) {
+  const [code, setCode]       = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState('');
+  const [done, setDone]       = useState(false);
+
+  const handleStart = async () => {
+    const normalized = code.trim().toUpperCase();
+    if (normalized.length < 4) { setError('Digite o código exibido no painel Nimrod do Foundry.'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const result = await api.post(`/missions/${missionId}/start`, { code: normalized });
+      setDone(true);
+      setTimeout(() => onStarted(result), 1500);
+    } catch (e) {
+      setError(e.message);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div
+      style={{ position:'fixed', inset:0, zIndex:600, background:'rgba(0,0,0,0.85)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{ background:'var(--bg-modal)', border:'1px solid var(--border-bright)', borderRadius:'12px', padding:'28px 24px', width:'min(100%, 440px)', boxShadow:'var(--shadow-lg)' }}>
+        {done ? (
+          <div style={{ textAlign:'center', padding:'20px 0' }}>
+            <div style={{ fontSize:40, marginBottom:12 }}>⚔️</div>
+            <div style={{ color:'#4a9a6a', fontFamily:'var(--font-display)', fontSize:16, fontWeight:700, letterSpacing:1 }}>Campanha iniciada!</div>
+            <div style={{ color:'var(--text-muted)', fontSize:13, marginTop:6 }}>O Foundry está vinculado e a sessão foi criada.</div>
+          </div>
+        ) : (
+          <>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:20 }}>
+              <div>
+                <div style={{ fontFamily:'var(--font-display)', fontSize:16, color:'var(--gold)', letterSpacing:1, fontWeight:700 }}>Iniciar campanha</div>
+                <div style={{ color:'var(--text-muted)', fontSize:12, marginTop:3 }}>{missionTitle}</div>
+              </div>
+              <button onClick={onClose} style={{ background:'none', color:'var(--text-muted)', border:'none', cursor:'pointer', padding:4 }}><X size={16} /></button>
+            </div>
+
+            {/* Tutorial */}
+            <div style={{ background:'rgba(201,168,76,0.06)', border:'1px solid rgba(201,168,76,0.2)', borderRadius:8, padding:'14px 16px', marginBottom:20, display:'flex', flexDirection:'column', gap:10 }}>
+              <div style={{ fontFamily:'var(--font-display)', fontSize:11, color:'var(--gold)', letterSpacing:1, textTransform:'uppercase' }}>Como funciona</div>
+              {[
+                { icon: <Monitor size={14}/>, text: 'Abra o Foundry VTT com o módulo Nimrod Bridge ativo' },
+                { icon: <Copy size={14}/>,    text: 'Um painel no canto da tela exibirá um código — copie ou anote' },
+                { icon: <Link size={14}/>,    text: 'Cole o código abaixo. A sessão será criada automaticamente.' },
+              ].map((s,i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:10, color:'var(--text-muted)', fontSize:13 }}>
+                  <span style={{ color:'var(--gold)', opacity:0.8, flexShrink:0 }}>{s.icon}</span>{s.text}
+                </div>
+              ))}
+              <div style={{ fontSize:11, color:'var(--text-faint)', borderTop:'1px solid var(--border)', paddingTop:8, marginTop:2 }}>
+                O código é válido durante toda a campanha. Se o Foundry reiniciar, o mesmo código pode ser reutilizado.
+              </div>
+            </div>
+
+            {/* Input do código */}
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              <label style={{ fontSize:12, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:0.5 }}>Código do Foundry</label>
+              <input
+                value={code}
+                onChange={e => { setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'')); setError(''); }}
+                onKeyDown={e => { if (e.key==='Enter') handleStart(); }}
+                placeholder="ABC1234"
+                maxLength={7}
+                autoFocus
+                style={{ fontFamily:'var(--font-mono)', fontSize:'clamp(18px, 6vw, 24px)', fontWeight:700, letterSpacing:'clamp(3px, 1.5vw, 8px)', textAlign:'center', background:'var(--bg-card)', border:`1px solid ${error ? 'var(--crimson)':'var(--border)'}`, borderRadius:6, padding:'10px 4px', color:'var(--gold)', outline:'none', width:'100%', boxSizing:'border-box' }}
+              />
+              {error && <div style={{ fontSize:12, color:'var(--crimson-bright)', textAlign:'center' }}>{error}</div>}
+            </div>
+
+            <div style={{ display:'flex', gap:10, marginTop:20 }}>
+              <button onClick={onClose} style={{ flex:1, padding:'10px', background:'transparent', border:'1px solid var(--border)', borderRadius:6, color:'var(--text-muted)', fontSize:13, cursor:'pointer' }}>
+                Cancelar
+              </button>
+              <button
+                onClick={handleStart}
+                disabled={loading || code.length < 4}
+                style={{ flex:1, padding:'10px', background:code.length >= 4 ? 'var(--crimson)':'var(--bg-card)', border:'1px solid rgba(196,48,48,0.3)', borderRadius:6, color:'#f0d0d0', fontSize:13, fontWeight:600, cursor:'pointer', opacity:code.length<4?0.5:1, transition:'all 0.15s' }}
+              >
+                {loading ? 'Iniciando…' : '⚔️ Iniciar campanha'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -247,7 +344,11 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
   const isOpen     = mission.status === 'OPEN';
   const isFinished = mission.status === 'FINISHED';
   const isClosed   = mission.status === 'CLOSED';
-  const isDimmed   = isFinished || isClosed;
+  const isDimmed   = isFinished;
+
+  const isUserReserve = mission.user_is_reserve === true;
+  const isUserPlayer  = mission.user_joined === true && !isUserReserve;
+
 
   const playerCount  = parseInt(mission.player_count) || 0;
   const reserveCount = parseInt(mission.reserve_count) || 0;
@@ -256,17 +357,20 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
   const participants = mission.participants ?? [];
   const activeSession = mission.activeSession ?? null;
   const lastSession = mission.lastSession ?? null;
-  const canOpenSession = !isNotice && canManage;
+  const canOpenSession  = !isNotice && canManage;
+  const isRunning       = mission.status === 'RUNNING';
   const canEnterFoundry = !isNotice && activeSession && (isCreator || (isOpen && mission.user_joined));
 
   // Banner: MISSÃO / AVISO / ENCERRADO / CONCLUÍDO
   const bannerLabel = isNotice
     ? 'AVISO'
-    : isOpen ? 'MISSÃO' : isClosed ? 'ENCERRADO' : 'CONCLUÍDO';
+    : isOpen ? 'MISSÃO' : isClosed ? 'INSCRIÇÕES FECHADAS' : isRunning ? 'EM ANDAMENTO' : 'CONCLUÍDO';
 
   const bannerColor = isNotice
     ? 'linear-gradient(90deg, #4a3800 0%, #2e2200 50%, #4a3800 100%)'
-    : 'linear-gradient(90deg, #7a1818 0%, #5a0e0e 50%, #7a1818 100%)';
+    : isRunning
+      ? 'linear-gradient(90deg, #1a4a1a 0%, #0e2e0e 50%, #1a4a1a 100%)'
+      : 'linear-gradient(90deg, #7a1818 0%, #5a0e0e 50%, #7a1818 100%)';
 
   // Actions
   const emitMission = useCallback((updated) => {
@@ -336,12 +440,23 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
     catch (e) { alert(e.message); }
   };
 
-  const openMissionSession = async () => {
+  const [startModalOpen, setStartModalOpen] = useState(false);
+
+  const closeRegistrations = async () => {
     setLoading(true);
     try {
-      const res = await api.post(`/missions/${mission.id}/session`, {});
-      if (res.mission) emitMission(res.mission);
-      if (res.session?.id) await launch({ sessionId: res.session.id });
+      const updated = await api.post(`/missions/${mission.id}/close-registrations`, {});
+      emitMission(updated);
+    } catch (e) { alert(e.message); }
+    setLoading(false);
+  };
+
+  const finishCampaign = async () => {
+    if (!confirm('Encerrar a campanha? A sessão será finalizada e o vínculo com o Foundry será removido.')) return;
+    setLoading(true);
+    try {
+      const updated = await api.post(`/missions/${mission.id}/finish`, {});
+      emitMission(updated);
     } catch (e) { alert(e.message); }
     setLoading(false);
   };
@@ -520,22 +635,21 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
             )}
 
             <div className="poster-actions">
-              {canEnterFoundry && (
+
+              {/* Entrar na aventura — jogadores confirmados + GM quando campanha RUNNING */}
+              {!isNotice && isRunning && (isCreator || currentUserIsGM || isUserPlayer) && (
                 <button onClick={enterFoundry} disabled={launchingFoundry} className="poster-btn poster-btn-primary">
                   <Dice5 size={11} /> Entrar na aventura
                 </button>
               )}
 
-              {canOpenSession && (
-                <button onClick={openMissionSession} disabled={loading} className="poster-btn poster-btn-outline">
-                  <Scroll size={11} /> {activeSession ? 'Abrir Sessão' : 'Abrir Sessão'}
-                </button>
-              )}
-
-              {/* Player join */}
+              {/* Inscrição de jogadores — só quando OPEN */}
               {!isNotice && isOpen && (
                 mission.user_joined ? (
-                  <button onClick={leave} disabled={loading} className="poster-btn poster-btn-outline">Sair</button>
+                  <>
+                    {isUserReserve && <span className="poster-reserve-badge">🕐 Na Reserva</span>}
+                    <button onClick={leave} disabled={loading} className="poster-btn poster-btn-outline">Sair</button>
+                  </>
                 ) : playersFull && reservesFull ? (
                   <span className="poster-queue-full">Fila Cheia</span>
                 ) : (
@@ -545,40 +659,65 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
                 )
               )}
 
-              {/* GM/creator actions */}
+              {/* Ações do narrador / GM */}
               {canManage && (
                 <>
-                  {isOpen && (
+                  {/* OPEN: fechar inscrições + editar + convidar */}
+                  {isOpen && !isNotice && (
                     <>
-                      {!isNotice && (
-                        <button onClick={() => setStatus('CLOSED')} disabled={loading} className="poster-btn poster-btn-outline">
-                          <X size={11} /> Fechar
-                        </button>
-                      )}
-                      <button onClick={() => {
-                        setEditing(true);
-                        setEditData({ title: mission.title, description: mission.description, meetingLocation: mission.meeting_location, level: mission.level, reward: mission.reward });
-                      }} className="poster-btn poster-btn-outline">
+                      <button onClick={closeRegistrations} disabled={loading} className="poster-btn poster-btn-outline">
+                        <X size={11} /> Fechar inscrições
+                      </button>
+                      <button onClick={() => { setEditing(true); setEditData({ title: mission.title, description: mission.description, meetingLocation: mission.meeting_location, level: mission.level, reward: mission.reward }); }} className="poster-btn poster-btn-outline">
                         <Edit3 size={11} /> Editar
                       </button>
-                      {!isNotice && (
-                        <button onClick={loadInviteUsers} className="poster-btn poster-btn-outline">
-                          <UserPlus size={11} /> Convidar
-                        </button>
-                      )}
+                      <button onClick={loadInviteUsers} className="poster-btn poster-btn-outline">
+                        <UserPlus size={11} /> Convidar
+                      </button>
                     </>
                   )}
-                  {isClosed && !isNotice && (
-                    <button onClick={() => setStatus('FINISHED')} disabled={loading} className="poster-btn poster-btn-primary">
-                      <Check size={11} /> Concluir
+                  {isOpen && isNotice && (
+                    <button onClick={() => { setEditing(true); setEditData({ title: mission.title, description: mission.description }); }} className="poster-btn poster-btn-outline">
+                      <Edit3 size={11} /> Editar
                     </button>
                   )}
-                  <button onClick={deleteMission} className="poster-btn poster-btn-danger">
-                    <Trash2 size={11} /> Apagar
-                  </button>
+
+                  {/* CLOSED: iniciar campanha (abre modal com campo de código) */}
+                  {isClosed && !isNotice && (
+                    <button onClick={() => setStartModalOpen(true)} disabled={loading} className="poster-btn poster-btn-primary">
+                      <Scroll size={11} /> Iniciar campanha
+                    </button>
+                  )}
+
+                  {/* RUNNING: encerrar campanha */}
+                  {isRunning && !isNotice && (
+                    <button onClick={finishCampaign} disabled={loading} className="poster-btn poster-btn-danger">
+                      <Check size={11} /> Encerrar campanha
+                    </button>
+                  )}
+
+                  {/* Sempre disponível para o criador/GM */}
+                  {!isFinished && !isRunning && (
+                    <button onClick={deleteMission} className="poster-btn poster-btn-danger">
+                      <Trash2 size={11} /> Apagar
+                    </button>
+                  )}
                 </>
               )}
             </div>
+
+            {/* Modal de início de campanha */}
+            {startModalOpen && (
+              <StartCampaignModal
+                missionId={mission.id}
+                missionTitle={mission.title}
+                onClose={() => setStartModalOpen(false)}
+                onStarted={(result) => {
+                  setStartModalOpen(false);
+                  if (result.mission) emitMission(result.mission);
+                }}
+              />
+            )}
 
             {editing && (
               <div className="poster-edit-form">

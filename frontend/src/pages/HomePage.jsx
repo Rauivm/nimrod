@@ -350,7 +350,7 @@ export default function HomePage() {
   }, []);
 
   const loadMissions = useCallback(async () => {
-    const data = await api.get(`/missions?status=OPEN&limit=${MISSIONS_PAGE_SIZE}`).catch(() => []);
+    const data = await api.get(`/missions?status=OPEN,CLOSED,RUNNING&limit=${MISSIONS_PAGE_SIZE}`).catch(() => []);
     setMissions(data);
   }, []);
 
@@ -359,9 +359,12 @@ export default function HomePage() {
   useEffect(() => {
     const upsertOpenMission = (mission) => {
       if (!mission?.id) return;
+      const visible = ['OPEN', 'CLOSED', 'RUNNING'].includes(mission.status);
       setMissions(prev => {
-        const next = prev.filter(m => m.id !== mission.id);
-        return mission.status === 'OPEN' ? [mission, ...next] : next;
+        const idx = prev.findIndex(m => m.id === mission.id);
+        if (idx === -1) return visible ? [mission, ...prev] : prev;
+        if (!visible) return prev.filter(m => m.id !== mission.id);
+        const next = [...prev]; next[idx] = mission; return next;
       });
     };
     const u1 = on('POST_CREATED', (post) => {
@@ -383,7 +386,7 @@ export default function HomePage() {
   }, [on]);
 
   const handleMissionCreated = useCallback((mission) => {
-    if (!mission?.id || mission.status !== 'OPEN') return;
+    if (!mission?.id || !['OPEN','CLOSED','RUNNING'].includes(mission?.status)) return;
     setMissions(prev => {
       const next = prev.filter(m => m.id !== mission.id);
       return [mission, ...next];

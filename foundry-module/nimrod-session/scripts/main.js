@@ -16,479 +16,423 @@
  *   deleteItem    → item consumido / removido
  *   deleteCombat  → marca fim de combate (HP final dos participantes)
  *
- * Guarda de GM:
- *   Todos os hooks verificam game.user.isGM antes de executar qualquer
- *   lógica. Só o GM (que roda o servidor Foundry) envia eventos — evita
+ * Guarda de acesso:
+ *   Todos os hooks verificam _canControl() antes de executar qualquer
+ *   lógica. Só o responsável pela sessão envia eventos — evita
  *   duplicatas em sessões com múltiplos clientes.
+ *
+ *   _canControl() retorna true se:
+ *     - game.user.isGM (role GM ou GM_PRINCIPAL no Foundry, que normalmente
+ *       corresponde a GM/GM_PRINCIPAL no Nimrod), OU
+ *     - o usuário autenticado no Nimrod é narrador da sessão ativa
+ *       (verificado via GET /api/sessions/:id e comparando narrator_ids)
  */
 
-import { SessionSync }   from "./SessionSync.js";
-import { EventDetector } from "./EventDetector.js";
-import { PlayerMap }     from "./PlayerMap.js";
+/**
+ * scripts/main.js — v3 (handshake architecture)
+ *
+ * Nimrod Session — Resource Log
+ *
+ * Mudanças v3:
+ *   - Controle de acesso baseado em game.user.isGM + sessionId disponível
+ *   - Não depende mais de JWT de lançamento ou sessionStorage
+ *   - SessionSync usa X-Nimrod-Key em vez de JWT
+ *   - Aguarda activeSessionId ficar disponível (propagado pelo nimrod-bridge)
+ *   - Settings: nimrodApiKey substituiu nimrodToken
+ */
 
-const MODULE_ID = "nimrod-session";
+import { SessionSync }   from './SessionSync.js';
+import { EventDetector } from './EventDetector.js';
+import { PlayerMap }     from './PlayerMap.js';
 
-// ═══════════════════════════════════════════════════════════════════════════════
+const MODULE_ID = 'nimrod-session';
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 1. SETTINGS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 
-Hooks.once("init", () => {
+Hooks.once('init', () => {
 
-  // Sync habilitado globalmente
-  game.settings.register(MODULE_ID, "syncEnabled", {
-    name:    "NS.Settings.SyncEnabled",
-    hint:    "NS.Settings.SyncEnabledHint",
-    scope:   "world",
-    config:  true,
-    type:    Boolean,
-    default: true,
+  game.settings.register(MODULE_ID, 'syncEnabled', {
+    name: 'NS.Settings.SyncEnabled', hint: 'NS.Settings.SyncEnabledHint',
+    scope: 'world', config: true, type: Boolean, default: true,
   });
 
-  // URL base do Nimrod (ex: https://nimrod.meusite.com)
-  game.settings.register(MODULE_ID, "nimrodUrl", {
-    name:    "NS.Settings.NimrodUrl",
-    hint:    "NS.Settings.NimrodUrlHint",
-    scope:   "world",
-    config:  true,
-    type:    String,
-    default: "",
+  game.settings.register(MODULE_ID, 'nimrodUrl', {
+    name: 'NS.Settings.NimrodUrl', hint: 'NS.Settings.NimrodUrlHint',
+    scope: 'world', config: true, type: String, default: '',
   });
 
-  // Token JWT do GM principal (copiado do painel Nimrod)
-  game.settings.register(MODULE_ID, "nimrodToken", {
-    name:    "NS.Settings.NimrodToken",
-    hint:    "NS.Settings.NimrodTokenHint",
-    scope:   "world",
+  // Substituiu nimrodToken — autenticação agora é por API Key
+  game.settings.register(MODULE_ID, 'nimrodApiKey', {
+    name:    'API Key do Nimrod',
+    hint:    'Chave FOUNDRY_API_KEY configurada no servidor. Preenchida automaticamente pelo nimrod-bridge.',
+    scope:   'world',
     config:  true,
     type:    String,
-    default: "",
+    default: '',
   });
 
-  // ID da sessão ativa no Nimrod (copiado do painel ao abrir a sessão)
-  game.settings.register(MODULE_ID, "activeSessionId", {
-    name:    "NS.Settings.ActiveSessionId",
-    hint:    "NS.Settings.ActiveSessionIdHint",
-    scope:   "world",
+  // Preenchido automaticamente pelo nimrod-bridge após o handshake
+  game.settings.register(MODULE_ID, 'activeSessionId', {
+    name:    'NS.Settings.ActiveSessionId',
+    hint:    'Preenchido automaticamente após o handshake com o Foundry.',
+    scope:   'world',
     config:  true,
     type:    String,
-    default: "",
-    onChange: () => {
-      // Limpa cache de eventos ao trocar de sessão
+    default: '',
+    onChange: (val) => {
       SessionSync.clearSentCache();
-      console.log(
-        `%cnimrod-session | Sessão ativa alterada → ${SessionSync.activeSessionId || "(nenhuma)"}`,
-        "color:#c9a84c",
-      );
+      console.log(`%cnimrod-session | Sessão ativa → ${val || '(nenhuma)'}`, 'color:#c9a84c');
+      // Se acabou de receber um sessionId e os hooks ainda não foram registrados, registra
+      if (val && !_hooksRegistered) _registerHooks();
     },
   });
 
-  // Filtrar apenas PCs com dono (ignora NPCs e tokens temporários)
-  game.settings.register(MODULE_ID, "onlyPlayerOwned", {
-    name:    "NS.Settings.OnlyPlayerOwned",
-    hint:    "NS.Settings.OnlyPlayerOwnedHint",
-    scope:   "world",
-    config:  true,
-    type:    Boolean,
-    default: true,
+  game.settings.register(MODULE_ID, 'onlyPlayerOwned', {
+    name: 'NS.Settings.OnlyPlayerOwned', hint: 'NS.Settings.OnlyPlayerOwnedHint',
+    scope: 'world', config: true, type: Boolean, default: true,
   });
 
-  // Capturar eventos de HP (pode ser verboso em combate)
-  game.settings.register(MODULE_ID, "trackHp", {
-    name:    "NS.Settings.TrackHp",
-    hint:    "NS.Settings.TrackHpHint",
-    scope:   "world",
-    config:  true,
-    type:    Boolean,
-    default: false,  // desativado por padrão — muito ruidoso em combate
+  game.settings.register(MODULE_ID, 'trackHp', {
+    name: 'NS.Settings.TrackHp', hint: 'NS.Settings.TrackHpHint',
+    scope: 'world', config: true, type: Boolean, default: false,
   });
 
-  // Capturar eventos de itens (createItem / deleteItem)
-  game.settings.register(MODULE_ID, "trackItems", {
-    name:    "NS.Settings.TrackItems",
-    hint:    "NS.Settings.TrackItemsHint",
-    scope:   "world",
-    config:  true,
-    type:    Boolean,
-    default: true,
+  game.settings.register(MODULE_ID, 'trackItems', {
+    name: 'NS.Settings.TrackItems', hint: 'NS.Settings.TrackItemsHint',
+    scope: 'world', config: true, type: Boolean, default: true,
   });
 
-  // Mapeamento Foundry userId → Nimrod UUID (editado pelo GM via console)
-  game.settings.register(MODULE_ID, "playerMap", {
-    name:    "Player Map",
-    scope:   "world",
-    config:  false,   // oculto da UI — editado via NimrodSession.players
-    type:    Object,
-    default: {},
+  game.settings.register(MODULE_ID, 'playerMap', {
+    name: 'Player Map', scope: 'world', config: false, type: Object, default: {},
   });
 
-  console.log(`%cnimrod-session | Initialized`, "color:#c9a84c;font-weight:bold");
+  console.log('%cnimrod-session | Initialized', 'color:#c9a84c;font-weight:bold');
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 2. HOOKS DE RECURSOS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// 2. CONTROLE DE ACESSO
+// ═══════════════════════════════════════════════════════════════════════════
 
-Hooks.once("ready", () => {
+/**
+ * Retorna true se este cliente deve enviar eventos.
+ * Apenas o GM do Foundry envia — evita duplicatas quando múltiplos
+ * clientes estão no mesmo mundo.
+ */
+function _canControl() {
+  return game.user.isGM;
+}
 
-  // ── Guarda: apenas o GM envia eventos ──────────────────────────────────────
-  if (!game.user.isGM) {
-    console.log("nimrod-session | Usuário não é GM — hooks de sync não registrados.");
-    _exposeApi();
-    return;
-  }
+// ═══════════════════════════════════════════════════════════════════════════
+// 3. REGISTRO DE HOOKS (chamado quando sessionId fica disponível)
+// ═══════════════════════════════════════════════════════════════════════════
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Hook: updateActor
-  // Assinatura v13/v14: (actor, changes, options, userId)
-  //
-  // IMPORTANTE: No Foundry v13+, o `actor` recebido no hook já reflete o
-  // estado PÓS-update. Para calcular deltas de ouro corretamente, capturamos
-  // o estado PRÉ-update via preUpdateActor.
-  // ─────────────────────────────────────────────────────────────────────────────
+let _hooksRegistered = false;
 
-  // Cache pré-update para calcular deltas de moeda corretamente
-  const preUpdateCache = new Map(); // actorId → { currency, hp }
+function _registerHooks() {
+  console.log("nimrod-session: REGISTER HOOKS");
+  if (_hooksRegistered) return;
+  //  if (!_canControl())   return;
 
-  Hooks.on("preUpdateActor", (actor, changes, _options, _userId) => {
-    // Só cacheia se há mudança relevante
+  _hooksRegistered = true;
+  console.log('%cnimrod-session | Registrando hooks de recursos…', 'color:#4a9a6a');
+
+  // Cache pré-update para deltas de moeda precisos
+  const preUpdateCache = new Map();
+
+  // Hooks.on('preUpdateActor', (actor, changes) => {
+  //   const hasCurrency = changes?.system?.currency;
+  //   const hasHp       = changes?.system?.attributes?.hp;
+  //   if (!hasCurrency && !hasHp) return;
+  //   preUpdateCache.set(actor.id, {
+  //     currency: hasCurrency ? { ...actor.system?.currency } : null,
+  //     hp:       hasHp       ? { ...actor.system?.attributes?.hp } : null,
+  //   });
+  //   if (preUpdateCache.size > 100) preUpdateCache.delete(preUpdateCache.keys().next().value);
+  // });
+
+  Hooks.on('preUpdateActor', (actor, changes, options, userId) => {
+
+    // Apenas quem originou a alteração mantém o snapshot
+    if (userId !== game.user.id) return;
+
     const hasCurrency = changes?.system?.currency;
-    const hasHp       = changes?.system?.attributes?.hp;
+    const hasHp = changes?.system?.attributes?.hp;
+
     if (!hasCurrency && !hasHp) return;
 
     preUpdateCache.set(actor.id, {
       currency: hasCurrency ? { ...actor.system?.currency } : null,
-      hp:       hasHp       ? { ...actor.system?.attributes?.hp } : null,
+      hp: hasHp ? { ...actor.system?.attributes?.hp } : null,
     });
 
-    // Limpa entradas antigas (evita memory leak em sessões longas)
     if (preUpdateCache.size > 100) {
-      const firstKey = preUpdateCache.keys().next().value;
-      preUpdateCache.delete(firstKey);
+      preUpdateCache.delete(preUpdateCache.keys().next().value);
     }
   });
 
-  Hooks.on("updateActor", async (actor, changes, _options, _userId) => {
-    // Só PCs com dono (se configurado)
-    const onlyOwned = game.settings.get(MODULE_ID, "onlyPlayerOwned");
-    if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== "character")) return;
+  console.log("register updateActor");
+  Hooks.on(
+    "updateActor",
+    async (actor, changes, options, userId) => {
 
-    const trackHp    = game.settings.get(MODULE_ID, "trackHp");
-    const sessionId  = SessionSync.activeSessionId;
-    if (!sessionId) return; // sem sessão ativa, ignora silenciosamente
+      // Apenas o cliente que originou a alteração envia
+      if (userId !== game.user.id)
+        return;
 
-    // Recupera playerId do mapeamento
-    const playerId = PlayerMap.getNimrodId(actor);
-    if (!playerId) {
-      // Sem mapeamento — loga uma vez a cada 60s para não poluir o console
-      _warnOnceMissingMap(actor);
-      return;
-    }
+      console.log("UPDATE HOOK NIMROD", actor.name, changes);
 
-    // Detecta eventos a partir das mudanças
-    let events = EventDetector.fromActorUpdate(actor, changes);
+      const onlyOwned = game.settings.get(MODULE_ID, "onlyPlayerOwned");
 
-    // Remove HP se desativado nas configurações
-    if (!trackHp) {
-      events = events.filter(e => e.resourceType !== "hp");
-    }
+      if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== "character"))
+        return;
 
-    // Injeta valueBefore/valueAfter de moedas via cache pré-update
-    const pre = preUpdateCache.get(actor.id);
-    if (pre) {
-      for (const event of events) {
-        if (event.resourceType === "gold" && pre.currency) {
-          // Recalcula delta com valores pré-update precisos
-          const RATES = { pp: 10, gp: 1, ep: 0.5, sp: 0.1, cp: 0.01 };
-          const goldBefore = Object.entries(pre.currency).reduce(
-            (sum, [c, v]) => sum + Number(v) * (RATES[c] ?? 0), 0,
-          );
-          const goldAfter = Object.entries(actor.system?.currency ?? {}).reduce(
-            (sum, [c, v]) => sum + Number(v) * (RATES[c] ?? 0), 0,
-          );
-          event.delta       = Math.round((goldAfter - goldBefore) * 100) / 100;
-          event.valueBefore = Math.round(goldBefore * 100) / 100;
-          event.valueAfter  = Math.round(goldAfter  * 100) / 100;
-          event.description = event.delta < 0
-            ? `Gastou ${Math.abs(event.delta)} po (${actor.name})`
-            : `Recebeu ${event.delta} po (${actor.name})`;
-        }
-        if (event.resourceType === "hp" && pre.hp) {
-          event.valueBefore = Number(pre.hp.value ?? 0);
-        }
+      if (!SessionSync.activeSessionId)
+        return;
+
+      const playerId = PlayerMap.getNimrodId(actor);
+
+      if (!playerId) {
+        _warnMissing(actor);
+        return;
       }
-      preUpdateCache.delete(actor.id);
+
+      let events = EventDetector.fromActorUpdate(actor, changes);
+
+      console.log(events);
+
+      if (!game.settings.get(MODULE_ID, "trackHp")) {
+        events = events.filter(e => e.resourceType !== "hp");
+      }
+
+      const pre = preUpdateCache.get(actor.id);
+
+      if (pre) {
+        for (const ev of events) {
+
+          if (ev.resourceType === "gold" && pre.currency) {
+
+            const RATES = {
+              pp: 10,
+              gp: 1,
+              ep: 0.5,
+              sp: 0.1,
+              cp: 0.01
+            };
+
+            const before = Object.entries(pre.currency)
+              .reduce((s,[c,v]) => s + Number(v) * (RATES[c] ?? 0), 0);
+
+            const after = Object.entries(actor.system?.currency ?? {})
+              .reduce((s,[c,v]) => s + Number(v) * (RATES[c] ?? 0), 0);
+
+            ev.delta = Math.round((after - before) * 100) / 100;
+            ev.valueBefore = Math.round(before * 100) / 100;
+            ev.valueAfter = Math.round(after * 100) / 100;
+
+            ev.description =
+              ev.delta < 0
+                ? `Gastou ${Math.abs(ev.delta)} po (${actor.name})`
+                : `Recebeu ${ev.delta} po (${actor.name})`;
+          }
+
+          if (ev.resourceType === "hp" && pre.hp) {
+              ev.valueBefore = Number(pre.hp.value ?? 0);
+              ev.valueAfter = Number(actor.system.attributes.hp.value ?? 0);
+              ev.delta = ev.valueAfter - ev.valueBefore;
+
+              ev.deltaMeta = {
+                  max_hp: Number(actor.system.attributes.hp.max ?? 0)
+              };
+
+              ev.description =
+                  ev.delta < 0
+                      ? `${actor.name} perdeu ${Math.abs(ev.delta)} HP`
+                      : `${actor.name} recuperou ${ev.delta} HP`;
+          }
+        }
+
+        preUpdateCache.delete(actor.id);
+      }
+
+      for (const ev of events) {
+
+        if (ev.delta === 0)
+          continue;
+
+        await SessionSync.sendEvent({
+          playerId,
+          actorName: actor.name,
+          ...ev,
+          foundryEventId: `${game.world.id}-${actor.id}-${ev.resourceType}-${Date.now()}`
+        });
+      }
     }
-
-    // Envia cada evento detectado
-    for (const ev of events) {
-      if (ev.delta === 0) continue; // delta zero após recalcular → ignora
-
-      await SessionSync.sendEvent({
-        playerId,
-        actorName:    actor.name,
-        resourceType: ev.resourceType,
-        delta:        ev.delta,
-        valueBefore:  ev.valueBefore,
-        valueAfter:   ev.valueAfter,
-        deltaMeta:    ev.deltaMeta,
-        description:  ev.description,
-        // foundryEventId único por evento + ator + timestamp
-        foundryEventId: `${game.world.id}-${actor.id}-${ev.resourceType}-${Date.now()}`,
-      });
-    }
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Hook: createItem — item adquirido
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  Hooks.on("createItem", async (item, _options, _userId) => {
-    if (!game.settings.get(MODULE_ID, "trackItems")) return;
-
+  );
+  console.log("register createItem");
+  Hooks.on('createItem', async (item) => {
+    if (!game.settings.get(MODULE_ID, 'trackItems')) return;
     const actor = item.parent;
     if (!(actor instanceof Actor)) return;
-
-    const onlyOwned = game.settings.get(MODULE_ID, "onlyPlayerOwned");
-    if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== "character")) return;
-
+    const onlyOwned = game.settings.get(MODULE_ID, 'onlyPlayerOwned');
+    if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== 'character')) return;
     if (!SessionSync.activeSessionId) return;
-
     const playerId = PlayerMap.getNimrodId(actor);
     if (!playerId) return;
-
-    const event = EventDetector.fromItemCreate(actor, item);
-    if (!event) return;
-
+    const ev = EventDetector.fromItemCreate(actor, item);
+    if (!ev) return;
     await SessionSync.sendEvent({
-      playerId,
-      actorName:      actor.name,
-      ...event,
+      playerId, actorName: actor.name, ...ev,
       foundryEventId: `${game.world.id}-createItem-${item.id}-${Date.now()}`,
     });
   });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Hook: deleteItem — item consumido/removido
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  Hooks.on("deleteItem", async (item, _options, _userId) => {
-    if (!game.settings.get(MODULE_ID, "trackItems")) return;
-
+  console.log("register deleteItem");
+  Hooks.on('deleteItem', async (item) => {
+    if (!game.settings.get(MODULE_ID, 'trackItems')) return;
     const actor = item.parent;
     if (!(actor instanceof Actor)) return;
-
-    const onlyOwned = game.settings.get(MODULE_ID, "onlyPlayerOwned");
-    if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== "character")) return;
-
+    const onlyOwned = game.settings.get(MODULE_ID, 'onlyPlayerOwned');
+    if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== 'character')) return;
     if (!SessionSync.activeSessionId) return;
-
     const playerId = PlayerMap.getNimrodId(actor);
     if (!playerId) return;
-
-    const event = EventDetector.fromItemDelete(actor, item);
-    if (!event) return;
-
+    const ev = EventDetector.fromItemDelete(actor, item);
+    if (!ev) return;
     await SessionSync.sendEvent({
-      playerId,
-      actorName:      actor.name,
-      ...event,
+      playerId, actorName: actor.name, ...ev,
       foundryEventId: `${game.world.id}-deleteItem-${item.id}-${Date.now()}`,
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Hook: deleteCombat — fim de combate
-  // Snapshot de HP de todos os combatentes ao encerrar o encontro
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  Hooks.on("deleteCombat", async (combat, _options, _userId) => {
-    if (!game.settings.get(MODULE_ID, "trackHp"))  return;
+  Hooks.on('deleteCombat', async (combat) => {
+    if (!game.settings.get(MODULE_ID, 'trackHp'))  return;
     if (!SessionSync.activeSessionId)               return;
-
-    // Só loga o HP final dos combatentes com dono
-    const combatants = combat.combatants?.contents ?? [];
-
-    for (const combatant of combatants) {
+    for (const combatant of (combat.combatants?.contents ?? [])) {
       const actor = combatant.actor;
-      if (!actor || actor.type !== "character" || !actor.hasPlayerOwner) continue;
-
+      if (!actor || actor.type !== 'character' || !actor.hasPlayerOwner) continue;
       const playerId = PlayerMap.getNimrodId(actor);
       if (!playerId) continue;
-
-      const hp    = actor.system?.attributes?.hp ?? {};
-      const value = Number(hp.value ?? 0);
-      const max   = Number(hp.max   ?? 0);
-
+      const hp = actor.system?.attributes?.hp ?? {};
       await SessionSync.sendEvent({
-        playerId,
-        actorName:      actor.name,
-        resourceType:   "hp",
-        delta:          0, // snapshot, não delta — marcado via deltaMeta
-        valueBefore:    null,
-        valueAfter:     value,
-        deltaMeta:      { snapshot: true, max_hp: max, combat_id: combat.id },
-        description:    `Fim de combate — ${actor.name}: ${value}/${max} HP`,
+        playerId, actorName: actor.name,
+        resourceType: 'hp', delta: 0,
+        valueBefore: null, valueAfter: Number(hp.value ?? 0),
+        deltaMeta: { snapshot: true, max_hp: Number(hp.max ?? 0), combat_id: combat.id },
+        description: `Fim de combate — ${actor.name}: ${hp.value}/${hp.max} HP`,
         foundryEventId: `${game.world.id}-combatEnd-${combat.id}-${actor.id}`,
       });
     }
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Botão na barra de cena (v13/v14: controls é um OBJETO)
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  Hooks.on("getSceneControlButtons", (controls) => {
+  // Botões na barra de cena
+  Hooks.on('getSceneControlButtons', (controls) => {
     controls[MODULE_ID] = {
-      name:  MODULE_ID,
-      title: "Nimrod Session",
-      icon:  "fa-solid fa-scroll",
-      order: 98,
+      name: MODULE_ID, title: 'Nimrod Session',
+      icon: 'fa-solid fa-scroll', order: 98,
       tools: {
         status: {
-          name:    "status",
-          title:   "Status da Sessão",
-          icon:    "fa-solid fa-circle-info",
-          button:  true,
+          name: 'status', title: 'Status da Sessão',
+          icon: 'fa-solid fa-circle-info', button: true,
           onClick: () => {
             const s = SessionSync.status();
-            const sessionLabel = s.activeSessionId
-              ? `Sessão: ${s.activeSessionId.slice(0, 8)}…`
-              : "Nenhuma sessão ativa";
-            const msg = `Nimrod Session | ${s.enabled ? "✅ Ativo" : "⏹ Inativo"} | ${sessionLabel} | ${s.sentCount} eventos enviados`;
-            ui.notifications.info(msg);
+            ui.notifications.info(
+              `Nimrod | ${s.enabled ? '✅' : '⏹'} | Sessão: ${s.activeSessionId?.slice(0,8) || 'nenhuma'} | ${s.sentCount} eventos`,
+            );
           },
         },
         ping: {
-          name:    "ping",
-          title:   "Testar Conexão Nimrod",
-          icon:    "fa-solid fa-satellite-dish",
-          button:  true,
+          name: 'ping', title: 'Testar Conexão',
+          icon: 'fa-solid fa-satellite-dish', button: true,
           onClick: async () => {
-            ui.notifications.info("nimrod-session | Testando conexão…");
             const ok = await SessionSync.ping();
-            if (ok) ui.notifications.info("nimrod-session | ✅ Conexão OK");
-            else    ui.notifications.error("nimrod-session | ❌ Conexão falhou — verifique URL e token nas configurações.");
+            ok ? ui.notifications.info('Nimrod | ✅ Conexão OK')
+               : ui.notifications.error('Nimrod | ❌ Falhou — verifique URL e API Key.');
           },
         },
         clearCache: {
-          name:    "clearCache",
-          title:   "Limpar Cache de Eventos",
-          icon:    "fa-solid fa-trash-can",
-          button:  true,
-          onClick: () => {
-            SessionSync.clearSentCache();
-            ui.notifications.info("nimrod-session | Cache de eventos limpo.");
-          },
+          name: 'clearCache', title: 'Limpar Cache de Eventos',
+          icon: 'fa-solid fa-trash-can', button: true,
+          onClick: () => { SessionSync.clearSentCache(); ui.notifications.info('Nimrod | Cache limpo.'); },
         },
       },
     };
   });
 
-  console.log(`%cnimrod-session | Hooks registrados ✓`, "color:#4a9a6a;font-weight:bold");
+  console.log('%cnimrod-session | Hooks registrados ✓', 'color:#4a9a6a;font-weight:bold');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. READY
+// ═══════════════════════════════════════════════════════════════════════════
+
+Hooks.once('ready', () => {
   _exposeApi();
-  _logStartupStatus();
+
+  // if (!_canControl()) {
+  //   console.log('nimrod-session | Usuário não é GM — hooks de sync não registrados.');
+  //   return;
+  // }
+
+  // Se o sessionId já está disponível (reload com sessão em andamento), registra imediatamente
+  if (SessionSync.activeSessionId) {
+    _registerHooks();
+  } else {
+    console.log('nimrod-session | Aguardando handshake para registrar hooks…');
+  }
+
+  _logStatus();
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 3. API GLOBAL
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. API GLOBAL
+// ═══════════════════════════════════════════════════════════════════════════
 
 function _exposeApi() {
   window.NimrodSession = {
-    /** Utilitários de sincronização HTTP */
-    sync: SessionSync,
-
-    /** Gerenciamento do mapa Foundry userId → Nimrod UUID */
-    players: PlayerMap,
-
-    /** Detector de eventos (útil para debug) */
+    sync:     SessionSync,
+    players:  PlayerMap,
     detector: EventDetector,
-
-    /**
-     * Envia um evento manualmente via console do Foundry.
-     * Útil para registrar eventos que o módulo não captura automaticamente.
-     *
-     * Exemplo:
-     *   await NimrodSession.log("Thorin", "gold", -50, { description: "Comprou poção" })
-     *
-     * @param {string} actorName   - Nome do personagem
-     * @param {string} type        - Tipo: 'gold'|'xp'|'potion'|'spell_slot'|'item'|'hp'|'custom'
-     * @param {number} delta       - Valor (+ ganho / − gasto)
-     * @param {object} [opts]      - { description, deltaMeta, valueBefore, valueAfter, playerId }
-     */
     async log(actorName, type, delta, opts = {}) {
-      // Tenta resolver o playerId pelo nome do ator se não foi fornecido
       let playerId = opts.playerId;
       if (!playerId) {
-        const actor = game.actors.find(a => a.name === actorName);
+        const actor = game.actors?.find(a => a.name === actorName);
         if (actor) playerId = PlayerMap.getNimrodId(actor);
       }
       if (!playerId) {
-        console.error(`nimrod-session | log: não foi possível resolver playerId para "${actorName}". Forneça opts.playerId.`);
+        console.error(`nimrod-session | log: playerId não encontrado para "${actorName}".`);
         return null;
       }
       return SessionSync.sendEvent({
-        playerId,
-        actorName,
-        resourceType: type,
-        delta,
-        description:  opts.description ?? null,
-        deltaMeta:    opts.deltaMeta   ?? {},
-        valueBefore:  opts.valueBefore ?? null,
-        valueAfter:   opts.valueAfter  ?? null,
+        playerId, actorName, resourceType: type, delta,
+        description: opts.description ?? null,
+        deltaMeta:   opts.deltaMeta   ?? {},
+        valueBefore: opts.valueBefore ?? null,
+        valueAfter:  opts.valueAfter  ?? null,
       });
     },
   };
-
-  console.log("%cnimrod-session | API disponível → window.NimrodSession", "color:#c9a84c");
-  console.log([
-    "  NimrodSession.sync.status()           → status atual",
-    "  NimrodSession.sync.ping()             → testar conexão",
-    "  NimrodSession.players.autoDiscover()  → mapear jogadores automaticamente",
-    "  NimrodSession.players.list()          → ver mapeamento atual",
-    "  NimrodSession.log(nome, tipo, delta)  → registrar evento manual",
-  ].join("\n"));
+  console.log('%cnimrod-session | window.NimrodSession disponível', 'color:#c9a84c');
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 4. HELPERS INTERNOS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
 
-/** Evita spam de aviso no console para atores sem mapeamento. */
-const _warnedActors = new Set();
 const _warnCooldowns = new Map();
-
-function _warnOnceMissingMap(actor) {
+function _warnMissing(actor) {
   const now = Date.now();
-  const last = _warnCooldowns.get(actor.id) ?? 0;
-  if (now - last < 60_000) return; // 1 aviso por minuto por ator
+  if ((now - (_warnCooldowns.get(actor.id) ?? 0)) < 60_000) return;
   _warnCooldowns.set(actor.id, now);
-  console.warn(
-    `nimrod-session | Ator "${actor.name}" (${actor.id}) não tem mapeamento no PlayerMap.`,
-    "Use NimrodSession.players.autoDiscover() ou NimrodSession.players.set(foundryUserId, nimrodId).",
-  );
+  console.warn(`nimrod-session | "${actor.name}" sem mapeamento. Use NimrodSession.players.autoDiscover()`);
 }
 
-function _logStartupStatus() {
-  const sessionId = SessionSync.activeSessionId;
-  const enabled   = SessionSync.enabled;
-  const url       = SessionSync.baseUrl;
-
-  console.group("%cnimrod-session | Status na inicialização", "color:#c9a84c;font-weight:bold");
-  console.log("Sync ativo:   ", enabled);
-  console.log("URL Nimrod:   ", url || "(não configurada)");
-  console.log("Sessão ativa: ", sessionId || "(nenhuma — configure em Module Settings)");
-  console.log("PlayerMap:    ", Object.keys(PlayerMap.getAll()).length, "jogadores mapeados");
+function _logStatus() {
+  console.group('%cnimrod-session | Status na inicialização', 'color:#c9a84c;font-weight:bold');
+  console.log('Sync:          ', SessionSync.enabled);
+  console.log('URL:           ', SessionSync.baseUrl || '(não configurada)');
+  console.log('API Key:       ', SessionSync.apiKey ? '✅' : '⚠️ ausente');
+  console.log('Sessão ativa:  ', SessionSync.activeSessionId || '(aguardando handshake)');
+  console.log('PlayerMap:     ', Object.keys(PlayerMap.getAll()).length, 'jogadores');
   console.groupEnd();
-
-  if (enabled && !sessionId) {
-    ui.notifications.warn(
-      "nimrod-session | Nenhuma sessão ativa. Configure o ID da sessão em Configurações do Módulo.",
-    );
-  }
-  if (enabled && !url) {
-    ui.notifications.warn(
-      "nimrod-session | URL do Nimrod não configurada. Configure em Configurações do Módulo.",
-    );
-  }
 }

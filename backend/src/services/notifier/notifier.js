@@ -135,11 +135,22 @@ export function notifyPollCreated(poll) {
     .map((o, i) => `${i + 1}. ${o.text}`)
     .join('\n');
 
+  const fields = [];
+  if (poll.closes_at || poll.closesAt) {
+    const d = new Date(poll.closes_at || poll.closesAt);
+    fields.push({
+      name:   '⏰ Prazo',
+      value:  d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+      inline: true,
+    });
+  }
+
   enqueueDiscord({
     embeds: [{
       title:       `📊 Nova Enquete`,
       description: `**${truncate(poll.question, 200)}**\n\n${optionList}`,
       color:       COLOUR.poll,
+      fields,
       footer:      footer(),
       timestamp:   timestamp(),
     }],

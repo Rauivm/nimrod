@@ -124,7 +124,15 @@ export const PostCard = memo(function PostCard({ post: initialPost, onUpdate, de
 
   const del = async () => {
     if (!confirm('Apagar este post?')) return;
-    try { await api.delete(`/posts/${post.id}`); onUpdate?.(); } catch (e) { alert(e.message); }
+    // Remove otimisticamente antes da chamada de API
+    onUpdate?.(post.id);
+    try {
+      await api.delete(`/posts/${post.id}`);
+    } catch (e) {
+      // Reverte em caso de erro (recarrega o pai)
+      onUpdate?.();
+      alert(e.message);
+    }
   };
 
   const loadReplies = useCallback(async () => {
@@ -283,7 +291,7 @@ function ReplyComposer({ parentId, onSubmit, onCancel }) {
   // Carrega personagens ativos do usuário
   useEffect(() => {
     if (!user?.id) return;
-    api.get(`/players/${user.id}/characters`)
+    api.get('/me/characters')
       .then(chars => {
         const active = chars.filter(c => !c.retired && c.active !== false);
         setCharacters(active);
@@ -398,7 +406,7 @@ export function PostComposer({ onPost }) {
   useEffect(() => {
     if (!user?.id) return;
     setCharsLoading(true);
-    api.get(`/players/${user.id}/characters`)
+    api.get('/me/characters')
       .then(chars => {
         const active = chars.filter(c => !c.retired && c.active !== false);
         setCharacters(active);

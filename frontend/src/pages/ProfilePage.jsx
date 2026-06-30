@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { useAuth, roleLabel, isGM } from '../contexts/AuthContext.jsx';
+import { useAuth, roleLabel, isGM, isGMPrincipal } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
 import CharacterCard from '../components/CharacterCard.jsx';
 import LinkCharacterModal from '../components/LinkCharacterModal.jsx';
 import { optimizeImageFile } from '../lib/imageOptimization.js';
-import { Camera, Plus, RefreshCw, ChevronDown, ChevronUp, Shield, Swords, Link, Unlink } from 'lucide-react';
+import { Camera, Plus, RefreshCw, ChevronDown, ChevronUp, Shield, Swords, Link, Unlink, Users, Search, ArrowLeft } from 'lucide-react';
 
 // ── Avatar upload ─────────────────────────────────────────────────────────────
 function AvatarUpload({ avatarUrl, displayName, isOwn, onUploaded }) {
@@ -124,16 +124,184 @@ function StatBadge({ icon: Icon, label, value }) {
   );
 }
 
+// ── All Players Panel (GM_PRINCIPAL only) ─────────────────────────────────────
+function AllPlayersPanel() {
+  const navigate = useNavigate();
+  const [players, setPlayers]   = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [search, setSearch]     = useState('');
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    api.get('/players')
+      .then(data => setPlayers(data ?? []))
+      .catch(() => setPlayers([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = players.filter(p =>
+    !search.trim() ||
+    p.displayName?.toLowerCase().includes(search.toLowerCase()) ||
+    p.characters?.some(c => c.name?.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  // Role label badge
+  const RoleBadge = ({ role }) => {
+    const styles = {
+      GM_PRINCIPAL: { color: '#c9a84c', background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)' },
+      GM:           { color: '#8888ee', background: 'rgba(100,100,220,0.12)', border: '1px solid rgba(100,100,220,0.3)' },
+      PLAYER:       { color: 'var(--text-faint)', background: 'transparent', border: '1px solid var(--border)' },
+    };
+    const s = styles[role] ?? styles.PLAYER;
+    return (
+      <span style={{ fontSize: '10px', fontFamily: 'var(--font-display)', letterSpacing: '1px',
+        padding: '2px 7px', borderRadius: 'var(--radius)', ...s }}>
+        {roleLabel(role)}
+      </span>
+    );
+  };
+
+  return (
+    <section className="profile-section">
+      <div className="profile-section-header">
+        <h2 className="profile-section-title">
+          <Users size={13} style={{ marginRight: 6 }} />
+          Todos os Jogadores
+        </h2>
+        <button className="add-char-btn" onClick={() => setExpanded(v => !v)}>
+          {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          {expanded ? 'Recolher' : `Ver todos (${players.length})`}
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="all-players-panel">
+          {/* Search */}
+          <div className="all-players-search">
+            <Search size={13} style={{ color: 'var(--text-faint)', flexShrink: 0 }} />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar jogador ou personagem..."
+              style={{ background: 'none', border: 'none', outline: 'none', color: 'var(--text)', fontSize: '13px', flex: 1 }}
+            />
+          </div>
+
+          {loading ? (
+            [1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 64 }} />)
+          ) : filtered.length === 0 ? (
+            <div className="empty-state">Nenhum jogador encontrado.</div>
+          ) : (
+            <div className="all-players-list">
+              {filtered.map(player => (
+                <button
+                  key={player.id}
+                  className="player-row"
+                  onClick={() => navigate(`/profile/${player.id}`)}
+                  title={`Ver perfil de ${player.displayName}`}
+                >
+                  {/* Avatar */}
+                  <div className="player-row-avatar">
+                    {player.avatarUrl
+                      ? <img src={player.avatarUrl} alt={player.displayName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : <span style={{ fontFamily: 'var(--font-display)', fontSize: 16, color: '#fff', fontWeight: 700 }}>
+                          {player.displayName?.[0]?.toUpperCase() ?? '?'}
+                        </span>
+                    }
+                  </div>
+
+                  {/* Identity */}
+                  <div className="player-row-info">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="player-row-name">{player.displayName}</span>
+                      <RoleBadge role={player.role} />
+                    </div>
+                    {player.characters.length > 0 ? (
+                      <div className="player-row-chars">
+                        {player.characters.slice(0, 3).map(c => (
+                          <span key={c.id} className="player-row-char-tag">
+                            {c.name}{c.level ? ` Nv${c.level}` : ''}
+                          </span>
+                        ))}
+                        {player.characters.length > 3 && (
+                          <span className="player-row-char-tag" style={{ color: 'var(--text-faint)' }}>
+                            +{player.characters.length - 3}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: 11, color: 'var(--text-faint)', fontStyle: 'italic' }}>
+                        Sem personagens ativos
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Missions count */}
+                  <div className="player-row-missions">
+                    <Swords size={11} style={{ color: 'var(--gold)', opacity: 0.7 }} />
+                    <span>{player.totalMissions}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <style>{`
+        .all-players-panel { display: flex; flex-direction: column; gap: 10px; }
+        .all-players-search {
+          display: flex; align-items: center; gap: 8px;
+          background: var(--bg-card); border: 1px solid var(--border);
+          border-radius: var(--radius); padding: 8px 12px;
+        }
+        .all-players-list { display: flex; flex-direction: column; gap: 6px; }
+        .player-row {
+          display: flex; align-items: center; gap: 14px;
+          background: var(--bg-card); border: 1px solid var(--border);
+          border-radius: var(--radius); padding: 10px 14px;
+          text-align: left; width: 100%;
+          transition: border-color 0.15s, background 0.15s;
+          cursor: pointer;
+        }
+        .player-row:hover { border-color: var(--gold-dim); background: var(--bg-card-hover); }
+        .player-row-avatar {
+          width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+          background: linear-gradient(135deg, #2a3060, #4a5090);
+          border: 2px solid var(--border); overflow: hidden;
+          display: flex; align-items: center; justify-content: center;
+        }
+        .player-row-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+        .player-row-name { font-size: 14px; font-weight: 600; color: var(--text); }
+        .player-row-chars { display: flex; flex-wrap: wrap; gap: 5px; }
+        .player-row-char-tag {
+          font-size: 11px; color: var(--text-muted);
+          background: var(--bg-elevated); border: 1px solid var(--border);
+          border-radius: var(--radius); padding: 1px 6px;
+          font-family: var(--font-mono);
+        }
+        .player-row-missions {
+          display: flex; align-items: center; gap: 4px;
+          font-size: 12px; font-family: var(--font-display);
+          color: var(--text-muted); flex-shrink: 0;
+        }
+      `}</style>
+    </section>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ProfilePage() {
   const { userId } = useParams();
+  const navigate = useNavigate();
   const { user: me, setUser } = useAuth();
   const { on } = useWs();
 
-  const targetId = userId ?? me?.id;
-  const isOwn    = targetId === me?.id;
-  const currentUserIsGM     = isGM(me);
-  const currentUserCanSelfLink = Boolean(me) && !currentUserIsGM;
+  const targetId   = userId ?? me?.id;
+  const isOwn      = targetId === me?.id;
+  const currentUserIsGM         = isGM(me);
+  const iAmGMPrincipal          = isGMPrincipal(me);
+  const currentUserCanSelfLink  = Boolean(me) && !currentUserIsGM;
 
   const [profile, setProfile]       = useState(null);
   const [loading, setLoading]       = useState(true);
@@ -259,7 +427,22 @@ export default function ProfilePage() {
   return (
     <div className="profile-root">
 
-      {/* ── Header card ──────────────────────────────────────────────────── */}
+      {/* ── Voltar (GM_PRINCIPAL vendo perfil alheio) ────────────────────── */}
+      {iAmGMPrincipal && !isOwn && (
+        <button
+          onClick={() => navigate('/profile')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: 'none', color: 'var(--text-muted)', fontSize: 13,
+            padding: '4px 0', border: 'none', cursor: 'pointer',
+            alignSelf: 'flex-start', transition: 'color 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = 'var(--gold)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+        >
+          <ArrowLeft size={14} /> Voltar para meu perfil
+        </button>
+      )}
       <div className="profile-header-card">
         <AvatarUpload
           avatarUrl={user.avatarUrl}
@@ -468,6 +651,9 @@ export default function ProfilePage() {
           onLinked={loadProfile}
         />
       )}
+
+      {/* ── Todos os jogadores (somente GM_PRINCIPAL no próprio perfil) ── */}
+      {iAmGMPrincipal && isOwn && <AllPlayersPanel />}
 
       <style>{`
         .profile-root { display: flex; flex-direction: column; gap: 24px; max-width: 860px; margin: 0 auto; }

@@ -44,6 +44,11 @@ export class EventDetector {
   static fromActorUpdate(actor, changes) {
     const events = [];
     const sys = changes?.system ?? {};
+    console.log(
+      "CHANGES JSON",
+      JSON.stringify(changes, null, 2)
+    );
+
 
     // ── 1. Ouro (moedas) ──────────────────────────────────────────────────────
     if (sys.currency) {
@@ -104,6 +109,37 @@ export class EventDetector {
           : `Recuperou espaço de magia nível ${slotLevel === "pact" ? "pact" : slotLevel} (${actor.name})`,
       });
     }
+    // ── 5. Nome ────────────────────────────────────────────────
+    if (changes.name !== undefined && changes.name !== actor.name) {
+        events.push({
+            resourceType: "name",
+            delta: 0,
+            valueBefore: actor.name,
+            valueAfter: changes.name,
+            description: `${actor.name} foi renomeado para ${changes.name}`,
+        });
+    }
+
+    // ── 6. Raça ────────────────────────────────────────────────
+    const race = changes.system?.details?.race;
+
+    if (race !== undefined) {
+        events.push({
+            resourceType: "race",
+            valueBefore: actor.system.details.race,
+            valueAfter: race,
+            delta: 0,
+            description: `Raça alterada`,
+        });
+    }
+
+    const { currency, abilities, attributes, details } = sys;
+
+    if (currency) console.log("Moedas alteradas:", currency);
+    if (abilities) console.log("Atributos alterados:", abilities);
+    if (attributes) console.log("Status (HP/AC) alterados:", attributes);
+
+    console.log("EVENTS", events);
 
     return events;
   }
@@ -238,25 +274,19 @@ export class EventDetector {
    * Detecta mudança de HP (value, temp, tempmax).
    */
   static #detectHp(actor, hpChanges) {
-    // Foca em hp.value (HP atual) — ignora max e tempmax como eventos separados
     const newHp = hpChanges.value;
-    if (newHp === undefined || newHp === null) return null;
 
-    const oldHp = actor.system?.attributes?.hp?.value ?? 0;
-    const delta  = Number(newHp) - Number(oldHp);
-    if (delta === 0) return null;
-
-    const maxHp = actor.system?.attributes?.hp?.max ?? 0;
+    if (newHp === undefined || newHp === null) {
+        return null;
+    }
 
     return {
-      resourceType: "hp",
-      delta,
-      valueBefore:  Number(oldHp),
-      valueAfter:   Number(newHp),
-      deltaMeta:    { max_hp: Number(maxHp) },
-      description:  delta < 0
-        ? `${actor.name} perdeu ${Math.abs(delta)} HP (${newHp}/${maxHp})`
-        : `${actor.name} recuperou ${delta} HP (${newHp}/${maxHp})`,
+        resourceType: "hp",
+        delta: null,
+        valueBefore: null,
+        valueAfter: Number(newHp),
+        deltaMeta: {},
+        description: `${actor.name} HP alterado`,
     };
   }
 }

@@ -20,7 +20,7 @@ import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
-import { isGM, isAdmin } from '../lib/roles.js';
+import { isGM, isAdmin, requireGMPrincipal } from '../lib/roles.js';
 
 const ALLOWED_IMG_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const MAX_AVATAR_BYTES  = 4 * 1024 * 1024; // 4 MB
@@ -185,6 +185,62 @@ export async function profileRoutes(fastify) {
     const unlinked = serializeChar(res.rows[0]);
     broadcast('CHARACTER_UPDATED', { userId: req.user.id, character: unlinked });
     return unlinked;
+  });
+
+  // ── GET /players  (GM_PRINCIPAL only) ─────────────────────────────────────
+  // Lista todos os usuários com seus personagens ativos resumidos.
+  // Usado pelo GM_PRINCIPAL para ter visão geral de todos os jogadores.
+  fastify.get('/players', async (req, reply) => {
+    if (!requireGMPrincipal(req, reply)) return reply;
+
+    const usersRes = await query(
+      `SELECT u.id,
+              COALESCE(u.display_name, u.name) AS display_name,
+              u.role,
+              u.avatar_url,
+              u.created_at,
+              COUNT(DISTINCT mp.mission_id) FILTER (WHERE mp.mission_id IS NOT NULL) AS total_missions
+       FROM users u
+       LEFT JOIN mission_participants mp ON mp.user_id = u.id
+       GROUP BY u.id
+       ORDER BY u.role DESC, u.display_name ASC`,
+      [],
+    );
+
+    // Busca todos os personagens ativos de uma vez (evita N+1)
+    const charsRes = await query(
+      `SELECT id, user_id, name, level, class, race, active, retired,
+              COALESCE(dead, FALSE) AS dead, token_img_url, foundry_actor_id
+       FROM player_characters
+       WHERE active = TRUE AND retired = FALSE AND COALESCE(dead, FALSE) = FALSE
+       ORDER BY name ASC`,
+      [],
+    );
+
+    // Agrupa personagens por user_id
+    const charsByUser = {};
+    for (const c of charsRes.rows) {
+      if (!charsByUser[c.user_id]) charsByUser[c.user_id] = [];
+      charsByUser[c.user_id].push({
+        id:             c.id,
+        name:           c.name,
+        level:          c.level ?? null,
+        class:          c.class ?? null,
+        race:           c.race  ?? null,
+        tokenImgUrl:    c.token_img_url ?? null,
+        foundryActorId: c.foundry_actor_id ?? null,
+      });
+    }
+
+    return usersRes.rows.map(u => ({
+      id:           u.id,
+      displayName:  u.display_name,
+      role:         u.role,
+      avatarUrl:    u.avatar_url ?? null,
+      createdAt:    u.created_at,
+      totalMissions: parseInt(u.total_missions) || 0,
+      characters:   charsByUser[u.id] ?? [],
+    }));
   });
 
   // ── GET /players/:userId/profile ───────────────────────────────────────────
