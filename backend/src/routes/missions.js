@@ -50,6 +50,10 @@ async function getMissionWithCounts(missionId, userId) {
             COUNT(CASE WHEN mp.type = 'RESERVE' THEN 1 END) as reserve_count,
             EXISTS(SELECT 1 FROM mission_participants WHERE mission_id = m.id AND user_id = $2) as user_joined,
             (SELECT type FROM mission_participants WHERE mission_id = m.id AND user_id = $2) as user_type,
+            EXISTS (
+              SELECT 1 FROM mission_participants
+              WHERE mission_id = m.id AND user_id = $2 AND type = 'RESERVE'
+            ) AS user_is_reserve,
             ROUND(AVG(mr.stars), 1) as avg_rating,
             COUNT(mr.stars) as rating_count
      FROM missions m
@@ -234,6 +238,10 @@ export async function missionRoutes(fastify) {
              COUNT(CASE WHEN mp.type = 'PLAYER' THEN 1 END) as player_count,
              COUNT(CASE WHEN mp.type = 'RESERVE' THEN 1 END) as reserve_count,
              EXISTS(SELECT 1 FROM mission_participants mp2 WHERE mp2.mission_id = m.id AND mp2.user_id = $1) as user_joined,
+             EXISTS (
+               SELECT 1 FROM mission_participants
+               WHERE mission_id = m.id AND user_id = $1 AND type = 'RESERVE'
+             ) AS user_is_reserve,
              ROUND(AVG(mr.stars), 1) as avg_rating
       FROM missions m
       JOIN users u ON u.id = m.creator_id

@@ -2,6 +2,7 @@ import { query } from '../db/index.js';
 import { signFoundryToken, verifyFoundryToken } from '../services/foundryAuth.js';
 import { resolveFoundryMapping } from '../services/foundryMap.js';
 import { readFoundryActorsDb, syncFoundryActors, upsertFoundryActors } from '../services/foundrySync.js';
+import { resolveActorOwnership } from '../services/actorResolution.js';
 import { isGM, isGMPrincipal, isAdmin, requireGM, requireGMPrincipal, requireAdmin } from '../lib/roles.js';
 import { broadcast } from "../ws/broadcast.js";
 
@@ -414,20 +415,11 @@ export async function foundryRoutes(fastify) {
     let userId      = null;
     let characterId = null;
 
-    // 1. Tenta via player_characters.foundry_actor_id (mais preciso)
-    if (actorId) {
-      const pcRes = await query(
-        `SELECT pc.id AS character_id, pc.user_id
-         FROM player_characters pc
-         WHERE pc.foundry_actor_id = $1
-           AND pc.active = TRUE AND pc.retired = FALSE
-         LIMIT 1`,
-        [actorId],
-      );
-      if (pcRes.rows.length) {
-        userId      = pcRes.rows[0].user_id;
-        characterId = pcRes.rows[0].character_id;
-      }
+    // 1. Tenta via resolução compartilhada (player_characters.foundry_actor_id)
+    const ownership = await resolveActorOwnership(actorId);
+    if (ownership) {
+      userId      = ownership.userId;
+      characterId = ownership.characterId;
     }
 
     // 2. Tenta via player_characters.name = characterName

@@ -57,22 +57,19 @@ export class EventDetector {
     }
 
     // ── 2. XP ─────────────────────────────────────────────────────────────────
-    const xpNew = sys.details?.xp?.value;
-    if (xpNew !== undefined && xpNew !== null) {
-      const xpOld = actor.system?.details?.xp?.value ?? 0;
-      const delta  = Number(xpNew) - Number(xpOld);
-      if (delta !== 0) {
-        events.push({
-          resourceType: "xp",
-          delta,
-          valueBefore:  Number(xpOld),
-          valueAfter:   Number(xpNew),
-          deltaMeta:    {},
-          description:  delta > 0
-            ? `+${delta} XP (${actor.name})`
-            : `${delta} XP (${actor.name})`,
-        });
-      }
+    // Mesmo padrão do HP: neste ponto `actor` já está pós-update, então
+    // comparar contra `actor.system` sempre dá delta = 0. Reporta apenas
+    // valueAfter — main.js resolve delta/valueBefore via preUpdateCache.
+    const xpAfter = sys.details?.xp?.value;
+    if (xpAfter !== undefined && xpAfter !== null) {
+      events.push({
+        resourceType: "xp",
+        delta:        0,    // placeholder — recalculado em main.js
+        valueBefore:  null, // idem
+        valueAfter:   Number(xpAfter),
+        deltaMeta:    {},
+        description:  `XP atualizado (${actor.name})`,
+      });
     }
 
     // ── 3. HP ─────────────────────────────────────────────────────────────────
@@ -83,6 +80,9 @@ export class EventDetector {
     }
 
     // ── 4. Espaços de magia ───────────────────────────────────────────────────
+    // Mesmo padrão do HP/XP: reporta apenas valueAfter por nível de slot;
+    // main.js resolve delta/valueBefore via preUpdateCache (snapshot de
+    // system.spells capturado em preUpdateActor).
     const spellChanges = sys.spells ?? {};
     for (const [key, val] of Object.entries(spellChanges)) {
       // key = "spell1" … "spell9" | "pact"
@@ -93,45 +93,21 @@ export class EventDetector {
       const newValue  = val?.value;
       if (newValue === undefined || newValue === null) continue;
 
-      const oldSlots = actor.system?.spells?.[key] ?? {};
-      const oldValue = Number(oldSlots.value ?? 0);
-      const delta    = Number(newValue) - oldValue;
-      if (delta === 0) continue;
-
       events.push({
         resourceType: "spell_slot",
-        delta,
-        valueBefore:  oldValue,
+        delta:        0,    // placeholder — recalculado em main.js
+        valueBefore:  null, // idem
         valueAfter:   Number(newValue),
         deltaMeta:    { slot_level: slotLevel },
-        description:  delta < 0
-          ? `Usou espaço de magia nível ${slotLevel === "pact" ? "pact" : slotLevel} (${actor.name})`
-          : `Recuperou espaço de magia nível ${slotLevel === "pact" ? "pact" : slotLevel} (${actor.name})`,
+        description:  `Espaço de magia nível ${slotLevel} atualizado (${actor.name})`,
       });
     }
-    // ── 5. Nome ────────────────────────────────────────────────
-    if (changes.name !== undefined && changes.name !== actor.name) {
-        events.push({
-            resourceType: "name",
-            delta: 0,
-            valueBefore: actor.name,
-            valueAfter: changes.name,
-            description: `${actor.name} foi renomeado para ${changes.name}`,
-        });
-    }
 
-    // ── 6. Raça ────────────────────────────────────────────────
-    const race = changes.system?.details?.race;
-
-    if (race !== undefined) {
-        events.push({
-            resourceType: "race",
-            valueBefore: actor.system.details.race,
-            valueAfter: race,
-            delta: 0,
-            description: `Raça alterada`,
-        });
-    }
+    // Nome e raça (e outras alterações cadastrais: classe, alinhamento,
+    // background, etc.) NÃO são registrados aqui. resource_deltas é uma
+    // tabela de consumo de recursos de sessão, não de histórico cadastral.
+    // Esse tipo de registro pertence a uma tabela futura (ex: character_history),
+    // ainda não implementada — decisão explícita de não misturar por ora.
 
     const { currency, abilities, attributes, details } = sys;
 

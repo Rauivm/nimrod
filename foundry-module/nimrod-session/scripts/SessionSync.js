@@ -136,7 +136,22 @@ export class SessionSync {
 
     const sessionId = this.activeSessionId;
     if (!sessionId) {
+/*       console.log({
+          sessionId,
+          actorId: payload.actorId,
+          actorName: payload.actorName
+      }); */
       console.warn('nimrod-session | sendEvent ignorado: sem sessão ativa (handshake pendente).');
+      return null;
+    }
+
+    if (!payload.actorId) {
+      console.warn('nimrod-session | sendEvent ignorado: actorId é obrigatório.', payload);
+      // console.log({
+      //     sessionId,
+      //     actorId: payload.actorId,
+      //     actorName: payload.actorName
+      // });
       return null;
     }
 
@@ -145,9 +160,11 @@ export class SessionSync {
 
     if (this.#sent.has(eventId)) return null;
 
+    // sessionId já vai na URL (/sessions/:id/events) — não precisa no body.
+    // O backend não conhece playerId aqui: resolve internamente a partir
+    // de actorId via player_characters.foundry_actor_id.
     const body = {
-      sessionId,
-      playerId:       payload.playerId,
+      actorId:        payload.actorId,
       actorName:      payload.actorName,
       resourceType:   payload.resourceType,
       delta:          payload.delta,
@@ -161,7 +178,6 @@ export class SessionSync {
     };
 
     try {
-      // const result = await this.#post('/nimrod/session/event', body);
       const result = await this.#post(
           `/sessions/${this.activeSessionId}/events`,
           body

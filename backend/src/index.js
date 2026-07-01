@@ -117,6 +117,22 @@ fastify.addHook('onRequest', async (req, reply) => {
     path === '/foundry/push-actors'       // autenticado por X-Nimrod-Key na rota
   ) return;
 
+  // POST /sessions/:id/events aceita dois caminhos de autenticação:
+  //   - Cloudflare Access (humano, via UI do Nimrod) → segue o fluxo normal abaixo
+  //   - X-Nimrod-Key (módulo Foundry) → pula cfAuthMiddleware; a própria rota
+  //     valida a chave novamente (timing-safe) e não depende de req.user.
+  // Chave ausente ou inválida cai no fluxo normal (nega acesso não autenticado).
+  if (/^\/sessions\/[^/]+\/events$/.test(path) && req.method === 'POST') {
+    const sentKey       = req.headers['x-nimrod-key'];
+    const configuredKey = process.env.FOUNDRY_API_KEY?.trim();
+    if (sentKey && configuredKey) {
+      const { timingSafeEqual } = await import('node:crypto');
+      const valid = sentKey.length === configuredKey.length &&
+        timingSafeEqual(Buffer.from(sentKey), Buffer.from(configuredKey));
+      if (valid) return; // pula cfAuthMiddleware — rota trata como origem Foundry
+    }
+  }
+
   await cfAuthMiddleware(req, reply);
 });
 

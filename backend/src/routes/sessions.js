@@ -27,6 +27,7 @@ import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
 import { assertRateLimit } from '../middleware/rateLimit.js';
 import { isGM, isGMPrincipal, requireGM, requireGMPrincipal } from '../lib/roles.js';
+import { resolveActorOwnership } from '../services/actorResolution.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Serializers
@@ -156,17 +157,18 @@ function validateSessionBody(body, reply) {
 }
 
 function validateEventBody(body, reply) {
-  // characterId é opcional: quando fornecido, actorName é derivado do banco.
-  // Quando ausente, actorName é obrigatório (compatibilidade com source=foundry).
-  const { playerId, actorName, characterId, resourceType, delta } = body ?? {};
+  // playerId OU actorId — não ambos exigidos. Requisições do módulo Foundry
+  // enviam apenas actorId; a rota resolve playerId/characterId internamente
+  // via resolveActorOwnership() antes de chegar aqui.
+  const { playerId, actorId, actorName, characterId, resourceType, delta } = body ?? {};
 
-  if (!playerId?.trim()) {
-    reply.code(400).send({ error: 'playerId é obrigatório.' });
+  if (!playerId?.trim() && !actorId?.trim()) {
+    reply.code(400).send({ error: 'playerId ou actorId é obrigatório.' });
     return false;
   }
-  // actorName é obrigatório apenas quando characterId não está presente
-  if (!characterId && !actorName?.trim()) {
-    reply.code(400).send({ error: 'actorName ou characterId é obrigatório.' });
+  // actorName é obrigatório apenas quando characterId/actorId não estão presentes
+  if (!characterId && !actorId && !actorName?.trim()) {
+    reply.code(400).send({ error: 'actorName, characterId ou actorId é obrigatório.' });
     return false;
   }
   if (!VALID_RESOURCE_TYPES.has(resourceType)) {
@@ -609,9 +611,29 @@ export async function sessionRoutes(fastify) {
 
   // ── POST /sessions/:id/events ──────────────────────────────────────────────
   // Registra um evento de recurso em uma sessão aberta.
-  // GM e GM_PRINCIPAL podem registrar. Foundry envia com source='foundry'.
+  //
+  // Dois caminhos de autenticação (ver hook global em index.js):
+  //   1. X-Nimrod-Key (módulo Foundry) — sem req.user. Envia apenas `actorId`;
+  //      resolveActorOwnership() traduz para playerId/characterId. O módulo
+  //      não precisa conhecer o usuário do Nimrod.
+  //   2. Cloudflare Access (GM/GM_PRINCIPAL via UI do Nimrod) — fluxo original,
+  //      exige playerId explícito e checa narrator_ids.
   fastify.post('/sessions/:id/events', async (req, reply) => {
-    if (!requireGM(req, reply)) return reply;
+    const sentKey       = req.headers['x-nimrod-key'];
+    const configuredKey = process.env.FOUNDRY_API_KEY?.trim();
+    let isFoundryOrigin = false;
+
+    if (sentKey && configuredKey) {
+      const { timingSafeEqual } = await import('node:crypto');
+      isFoundryOrigin = sentKey.length === configuredKey.length &&
+        timingSafeEqual(Buffer.from(sentKey), Buffer.from(configuredKey));
+    }
+
+    // requireGM só se aplica a chamadas humanas — a origem Foundry já foi
+    // validada acima pela API key (não depende de req.user).
+    if (!isFoundryOrigin) {
+      if (!requireGM(req, reply)) return reply;
+    }
     if (!assertRateLimit(req, reply, 'sessions:events', { limit: 120, windowMs: 60_000 })) return reply;
 
     if (!isValidUuid(req.params.id)) {
@@ -631,18 +653,21 @@ export async function sessionRoutes(fastify) {
     // Sessões fechadas ainda aceitam eventos — marcados como out_of_session = TRUE.
     // Isso preserva a sincronização com o Foundry sem criar inconsistências.
     if (sl.status !== 'open') {
-      return reply.code(400).send({ error: `SessÃ£o jÃ¡ estÃ¡ com status "${sl.status}" e nÃ£o aceita novos eventos.` });
+      return reply.code(400).send({ error: `Sessão já está com status "${sl.status}" e não aceita novos eventos.` });
     }
 
-    // GM comum só pode registrar em sessões onde é narrador (aberta ou fechada)
-    if (!isGMPrincipal(req.user) && !sl.narrator_ids.includes(req.user.id)) {
+    // GM comum só pode registrar em sessões onde é narrador. Chamadas de
+    // origem Foundry (X-Nimrod-Key) já foram autorizadas no handshake/link
+    // e não têm req.user — pulam esta checagem.
+    if (!isFoundryOrigin && !isGMPrincipal(req.user) && !sl.narrator_ids.includes(req.user.id)) {
       return reply.code(403).send({ error: 'Você não é narrador desta sessão.' });
     }
 
     if (!validateEventBody(req.body, reply)) return reply;
 
     const {
-      playerId,
+      playerId       = null,
+      actorId        = null,
       characterId    = null,
       resourceType,
       delta,
@@ -652,53 +677,63 @@ export async function sessionRoutes(fastify) {
       description    = null,
       foundryEventId = null,
       occurredAt     = null,
-      source         = 'manual',
+      source         = isFoundryOrigin ? 'foundry' : 'manual',
     } = req.body;
 
-    const resolvedSource = VALID_SOURCES.has(source) ? source : 'manual';
+    const resolvedSource = VALID_SOURCES.has(source) ? source : (isFoundryOrigin ? 'foundry' : 'manual');
+
+    let resolvedPlayerId    = playerId;
+    let resolvedCharacterId = characterId;
+    let resolvedActorName   = req.body.actorName?.trim() ?? null;
+
+    // ── Resolução via actorId (módulo Foundry não conhece o playerId) ────────
+    // Usa a função compartilhada com /nimrod/session/presence. Só resolve
+    // personagens já sincronizados (foundry_actor_id preenchido) — essa é
+    // a regra aceita do sistema: personagem nunca sincronizado não gera
+    // eventos automáticos até sincronizar pelo menos uma vez.
+    if (!resolvedPlayerId && actorId) {
+      const ownership = await resolveActorOwnership(actorId);
+      if (!ownership) {
+        return reply.code(400).send({
+          error: `Nenhum personagem sincronizado encontrado para o actorId "${actorId}". Sincronize o personagem (foundry_actor_id) antes de registrar eventos.`,
+        });
+      }
+      resolvedPlayerId    = ownership.userId;
+      resolvedCharacterId = resolvedCharacterId ?? ownership.characterId;
+      resolvedActorName = resolvedActorName ?? ownership.actorName ?? ownership.characterName;
+    }
+
+    if (!resolvedPlayerId) {
+      return reply.code(400).send({ error: 'playerId ou actorId é obrigatório.' });
+    }
 
     // Verifica se jogador existe
-    if (!isValidUuid(playerId)) {
-      return reply.code(400).send({ error: `playerId inválido: "${playerId}". Deve ser um UUID.` });
+    if (!isValidUuid(resolvedPlayerId)) {
+      return reply.code(400).send({ error: `playerId inválido: "${resolvedPlayerId}". Deve ser um UUID.` });
     }
-    const playerCheck = await query('SELECT id FROM users WHERE id = $1', [playerId]);
+    const playerCheck = await query('SELECT id FROM users WHERE id = $1', [resolvedPlayerId]);
     if (!playerCheck.rows.length) {
       return reply.code(400).send({ error: 'playerId não encontrado.' });
     }
+
+    // participant: informativo apenas — não bloqueia o registro do evento
+    // (decisão explícita: um GM pode alterar a ficha de alguém fora da
+    // lista oficial de participantes da missão sem perder o dado).
     let participant = false;
-
     if (sl.mission_id) {
-      const participantCheck = await query(
-        `SELECT 1
-          FROM mission_participants
-          WHERE mission_id = $1
-            AND user_id = $2
-          LIMIT 1`,
-        [sl.mission_id, playerId],
-      );
-
-      participant = participantCheck.rows.length > 0;
-    }
-
-/*     if (sl.mission_id) {
       const participantCheck = await query(
         `SELECT 1
          FROM mission_participants
          WHERE mission_id = $1 AND user_id = $2
          LIMIT 1`,
-        [sl.mission_id, playerId],
+        [sl.mission_id, resolvedPlayerId],
       );
-      if (!participantCheck.rows.length) {
-        return reply.code(403).send({ error: 'Jogador nÃ£o participa desta missÃ£o.' });
-      }
-    } */
+      participant = participantCheck.rows.length > 0;
+    }
 
-    // Resolve actorName: se characterId foi fornecido, valida e deriva o nome
-    let resolvedActorName = req.body.actorName?.trim() ?? null;
-
-    let resolvedCharacterId = characterId;
-
-    if (resolvedCharacterId) {
+    // Resolve actorName/characterId quando characterId foi fornecido
+    // explicitamente (não veio da resolução por actorId acima)
+    if (characterId && characterId === resolvedCharacterId) {
       if (!isValidUuid(resolvedCharacterId)) {
         return reply.code(400).send({ error: `characterId inválido: "${characterId}". Deve ser um UUID.` });
       }
@@ -715,7 +750,7 @@ export async function sessionRoutes(fastify) {
 
       const ch = charCheck.rows[0];
 
-      if (ch.user_id !== playerId) {
+      if (ch.user_id !== resolvedPlayerId) {
         return reply.code(400).send({ error: 'Personagem não pertence ao jogador informado.' });
       }
       if (!ch.active) {
@@ -732,7 +767,7 @@ export async function sessionRoutes(fastify) {
     }
 
     if (!resolvedActorName) {
-      return reply.code(400).send({ error: 'actorName ou characterId válido é obrigatório.' });
+      return reply.code(400).send({ error: 'actorName, characterId ou actorId válido é obrigatório.' });
     }
 
     if (!resolvedCharacterId) {
@@ -746,10 +781,15 @@ export async function sessionRoutes(fastify) {
            AND dead = FALSE
          ORDER BY updated_at DESC NULLS LAST
          LIMIT 1`,
-        [playerId, resolvedActorName],
+        [resolvedPlayerId, resolvedActorName],
       );
       resolvedCharacterId = charByName.rows[0]?.id ?? null;
     }
+
+    // registered_by: chamadas humanas usam req.user.id; chamadas do módulo
+    // Foundry (X-Nimrod-Key) não têm req.user — usa o próprio jogador
+    // resolvido como autor do registro.
+    const registeredBy = isFoundryOrigin ? resolvedPlayerId : req.user.id;
 
     let res;
     try {
@@ -767,9 +807,9 @@ export async function sessionRoutes(fastify) {
          RETURNING *`,
         [
           req.params.id,
-          playerId,
+          resolvedPlayerId,
           resolvedActorName,
-          req.user.id,
+          registeredBy,
           resolvedSource,
           resourceType,
           delta,

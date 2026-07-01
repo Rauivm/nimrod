@@ -159,12 +159,15 @@ function _registerHooks() {
 
     const hasCurrency = changes?.system?.currency;
     const hasHp = changes?.system?.attributes?.hp;
+    const hasXp = changes?.system?.details?.xp;
 
-    if (!hasCurrency && !hasHp) return;
+    if (!hasCurrency && !hasHp && !hasXp) return;
 
     preUpdateCache.set(actor.id, {
       currency: hasCurrency ? { ...actor.system?.currency } : null,
       hp: hasHp ? { ...actor.system?.attributes?.hp } : null,
+      xp: hasXp ? { ...actor.system?.details?.xp } : null,
+//      xp: foundry.utils.deepClone(actor.system.details.xp),
     });
 
     if (preUpdateCache.size > 100) {
@@ -182,6 +185,13 @@ function _registerHooks() {
         return;
 
       console.log("UPDATE HOOK NIMROD", actor.name, changes);
+      console.log({
+          actor: actor.name,
+          hookUserId: userId,
+          localUserId: game.user.id,
+          localUser: game.user.name,
+          isGM: game.user.isGM
+      });
 
       const onlyOwned = game.settings.get(MODULE_ID, "onlyPlayerOwned");
 
@@ -191,12 +201,14 @@ function _registerHooks() {
       if (!SessionSync.activeSessionId)
         return;
 
-      const playerId = PlayerMap.getNimrodId(actor);
+/*       const playerId = PlayerMap.getNimrodId(actor);
 
       if (!playerId) {
-        _warnMissing(actor);
-        return;
-      }
+        console.debug(
+            `nimrod-session | Ignorando actor não mapeado: ${actor.name}`
+        );
+          return;
+      } */
 
       let events = EventDetector.fromActorUpdate(actor, changes);
 
@@ -251,6 +263,17 @@ function _registerHooks() {
                       ? `${actor.name} perdeu ${Math.abs(ev.delta)} HP`
                       : `${actor.name} recuperou ${ev.delta} HP`;
           }
+
+          if (ev.resourceType === "xp" && pre.xp) {
+              ev.valueBefore = Number(pre.xp.value ?? 0);
+              ev.valueAfter  = Number(actor.system.details.xp.value ?? 0);
+              ev.delta       = ev.valueAfter - ev.valueBefore;
+
+              ev.description =
+                  ev.delta < 0
+                      ? `${actor.name} perdeu ${Math.abs(ev.delta)} XP`
+                      : `${actor.name} recebeu ${ev.delta} XP`;
+          }
         }
 
         preUpdateCache.delete(actor.id);
@@ -262,7 +285,7 @@ function _registerHooks() {
           continue;
 
         await SessionSync.sendEvent({
-          playerId,
+          actorId: actor.id,
           actorName: actor.name,
           ...ev,
           foundryEventId: `${game.world.id}-${actor.id}-${ev.resourceType}-${Date.now()}`
@@ -290,17 +313,22 @@ function _registerHooks() {
   console.log("register deleteItem");
   Hooks.on('deleteItem', async (item) => {
     if (!game.settings.get(MODULE_ID, 'trackItems')) return;
+
     const actor = item.parent;
     if (!(actor instanceof Actor)) return;
+
     const onlyOwned = game.settings.get(MODULE_ID, 'onlyPlayerOwned');
     if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== 'character')) return;
+
     if (!SessionSync.activeSessionId) return;
-    const playerId = PlayerMap.getNimrodId(actor);
-    if (!playerId) return;
+
     const ev = EventDetector.fromItemDelete(actor, item);
     if (!ev) return;
+
     await SessionSync.sendEvent({
-      playerId, actorName: actor.name, ...ev,
+      actorId: actor.id,
+      actorName: actor.name,
+      ...ev,
       foundryEventId: `${game.world.id}-deleteItem-${item.id}-${Date.now()}`,
     });
   });
