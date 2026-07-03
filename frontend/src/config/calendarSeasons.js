@@ -42,8 +42,8 @@ export const SEASONS = {
     icon: Snowflake,
     tagline: 'Frio intenso. Rastreio e sobrevivência mais difíceis; alimento e pousada custam mais.',
     images: {
-      early: '/images/seasons/winter-early.webp',
-      late: '/images/seasons/winter-late.webp',
+      early: '/images/seasons/winter-early.png',
+      late: '/images/seasons/winter-late.png',
     },
     effects: [
       { icon: Footprints, text: 'Aumento da dificuldade de rastreio' },
@@ -63,8 +63,8 @@ export const SEASONS = {
     icon: Flower2,
     tagline: 'Início do ano. Mais bestas e doenças no ar, mas o custo de alimentos cai — época de festas de colheita.',
     images: {
-      early: '/images/seasons/spring-early.webp',
-      late: '/images/seasons/spring-late.webp',
+      early: '/images/seasons/spring-early.png',
+      late: '/images/seasons/spring-late.png',
     },
     effects: [
       { icon: Bug, text: 'Aumento no número de bestas e doenças' },
@@ -83,8 +83,8 @@ export const SEASONS = {
     icon: Sun,
     tagline: 'Calor forte e tempestades. Rastreio mais fácil — é a época de reprodução da maioria das bestas.',
     images: {
-      early: '/images/seasons/summer-early.webp',
-      late: '/images/seasons/summer-late.webp',
+      early: '/images/seasons/summer-early.png',
+      late: '/images/seasons/summer-late.png',
     },
     effects: [
       { icon: CloudRain, text: 'Calor intenso e chuvas fortes' },
@@ -103,8 +103,8 @@ export const SEASONS = {
     icon: Leaf,
     tagline: 'Fim do ano. Escassez de alimentos e dificuldade moderada em rastreio e sobrevivência.',
     images: {
-      early: '/images/seasons/autumn-early.webp',
-      late: '/images/seasons/autumn-late.webp',
+      early: '/images/seasons/autumn-early.png',
+      late: '/images/seasons/autumn-late.png',
     },
     effects: [
       { icon: Wheat, text: 'Escassez de alimentos' },

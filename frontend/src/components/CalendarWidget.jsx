@@ -41,6 +41,12 @@ export function CalendarWidget() {
   const SeasonIcon  = season.icon;
   const NextIcon    = nextSeason.icon;
 
+  console.log({
+    season: state.season,
+    sceneImage,
+    seasonConfig: season,
+  });
+
   return (
     <Link to="/calendar" className="cw-panel">
       <div className="cw-header">
