@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { PostCard, PostComposer } from '../components/PostCard.jsx';
 import { MissionPoster } from '../components/MissionPoster.jsx';
 import { OnlinePlayersPanel } from '../components/OnlinePlayersPanel.jsx';
+import { CalendarWidget } from '../components/CalendarWidget.jsx';
 import { ChevronDown, ChevronUp, Plus, X, Layers } from 'lucide-react';
 
 const POSTS_PAGE_SIZE = 20;
@@ -504,6 +505,7 @@ export default function HomePage() {
       {/* ── Sidebar ─────────────────────────────────────── */}
       <aside className="home-sidebar">
         <OnlinePlayersPanel />
+        <CalendarWidget />
       </aside>
 
       {showCreateMission && (
@@ -513,14 +515,14 @@ export default function HomePage() {
       <style>{`
         .home-root {
           display: grid;
-          grid-template-columns: 1fr 200px;
+          grid-template-columns: 1fr 260px;
           gap: 24px;
           align-items: start;
-          max-width: 960px;
+          max-width: 1020px;
           margin: 0 auto;
         }
         .home-main { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
-        .home-sidebar { min-width: 0; }
+        .home-sidebar { min-width: 0; display: flex; flex-direction: column; gap: 16px;}
 
         /* ── Poster grid ─────────────────────────────────── */
         .home-poster-grid {

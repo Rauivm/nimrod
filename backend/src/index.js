@@ -22,6 +22,7 @@ import { mkdirSync } from 'fs';
 
 import { runMigrations } from './db/index.js';
 import { cfAuthMiddleware } from './middleware/auth.js';
+import { isFoundryRequest } from './lib/foundryAuth.js';
 import { registerClient } from './ws/broadcast.js';
 import { postRoutes } from './routes/posts.js';
 import { missionRoutes } from './routes/missions.js';
@@ -36,6 +37,7 @@ import { startFoundryActorSyncJob } from './services/foundrySync.js';
 import { patchNoteRoutes } from './routes/patchNotes.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { arcRoutes }     from './routes/arcs.js';
+import { calendarRoutes } from './routes/calendar.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
@@ -120,17 +122,10 @@ fastify.addHook('onRequest', async (req, reply) => {
   // POST /sessions/:id/events aceita dois caminhos de autenticação:
   //   - Cloudflare Access (humano, via UI do Nimrod) → segue o fluxo normal abaixo
   //   - X-Nimrod-Key (módulo Foundry) → pula cfAuthMiddleware; a própria rota
-  //     valida a chave novamente (timing-safe) e não depende de req.user.
+  //     valida a chave novamente (via isFoundryRequest) e não depende de req.user.
   // Chave ausente ou inválida cai no fluxo normal (nega acesso não autenticado).
   if (/^\/sessions\/[^/]+\/events$/.test(path) && req.method === 'POST') {
-    const sentKey       = req.headers['x-nimrod-key'];
-    const configuredKey = process.env.FOUNDRY_API_KEY?.trim();
-    if (sentKey && configuredKey) {
-      const { timingSafeEqual } = await import('node:crypto');
-      const valid = sentKey.length === configuredKey.length &&
-        timingSafeEqual(Buffer.from(sentKey), Buffer.from(configuredKey));
-      if (valid) return; // pula cfAuthMiddleware — rota trata como origem Foundry
-    }
+    if (await isFoundryRequest(req)) return; // rota trata como origem Foundry
   }
 
   await cfAuthMiddleware(req, reply);
@@ -149,6 +144,7 @@ await fastify.register(profileRoutes);
 await fastify.register(sessionRoutes);
 await fastify.register(arcRoutes);
 await fastify.register(patchNoteRoutes);
+await fastify.register(calendarRoutes);
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 try {

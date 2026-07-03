@@ -2,7 +2,7 @@ import { Outlet, NavLink } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth, roleLabel, isGM, isGMPrincipal } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
-import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil, UserCircle, BookOpen } from 'lucide-react';
+import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil, UserCircle, BookOpen, Calendar } from 'lucide-react';
 import EditDisplayNameModal from './EditDisplayNameModal.jsx';
 
 import { useFoundryLaunch } from '../hooks/useFoundryLaunch.js';
@@ -73,6 +73,9 @@ export default function Layout() {
             </NavLink>
             <NavLink to="/maps" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
               <Map size={14} /><span>Mapas</span>
+            </NavLink>
+            <NavLink to="/calendar" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Calendar size={14} /><span>Calendário</span>
             </NavLink>
             <NavLink to="/profile" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
               <UserCircle size={14} /><span>Perfil</span>
