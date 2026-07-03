@@ -28,15 +28,6 @@ export class SessionSync {
     catch { return false; }
   }
 
-/*   static get baseUrl() {
-    try {
-      // Tenta nimrod-session primeiro, depois nimrod-bridge (mesma setting)
-      const url = game.settings.get(MODULE_ID, 'nimrodUrl')
-               ?? game.settings.get('nimrod-bridge', 'nimrodUrl')
-               ?? '';
-      return url.replace(/\/$/, '');
-    } catch { return ''; }
-  } */
  static get baseUrl() {
     try {
       const url =
@@ -136,22 +127,12 @@ export class SessionSync {
 
     const sessionId = this.activeSessionId;
     if (!sessionId) {
-/*       console.log({
-          sessionId,
-          actorId: payload.actorId,
-          actorName: payload.actorName
-      }); */
       console.warn('nimrod-session | sendEvent ignorado: sem sessão ativa (handshake pendente).');
       return null;
     }
 
     if (!payload.actorId) {
       console.warn('nimrod-session | sendEvent ignorado: actorId é obrigatório.', payload);
-      // console.log({
-      //     sessionId,
-      //     actorId: payload.actorId,
-      //     actorName: payload.actorName
-      // });
       return null;
     }
 
@@ -161,8 +142,8 @@ export class SessionSync {
     if (this.#sent.has(eventId)) return null;
 
     // sessionId já vai na URL (/sessions/:id/events) — não precisa no body.
-    // O backend não conhece playerId aqui: resolve internamente a partir
-    // de actorId via player_characters.foundry_actor_id.
+    // O módulo não envia playerId. O backend resolve playerId e characterId
+    // a partir do actorId (player_characters.foundry_actor_id).
     const body = {
       actorId:        payload.actorId,
       actorName:      payload.actorName,
@@ -183,8 +164,14 @@ export class SessionSync {
           body
       );
       this.#sent.add(eventId);
+      // Cache de deduplicação — evita crescimento indefinido em sessões longas
+      if (this.#sent.size > 5000) this.#sent.clear();
+
+      const deltaLabel = payload.delta == null
+        ? ''
+        : ` ${payload.delta > 0 ? '+' : ''}${payload.delta}`;
       console.log(
-        `%cnimrod-session | ✓ ${payload.resourceType} ${payload.delta > 0 ? '+' : ''}${payload.delta} → ${payload.actorName}`,
+        `%cnimrod-session | ✓ ${payload.resourceType}${deltaLabel} → ${payload.actorName}`,
         'color:#4a9a6a',
       );
       return result;
@@ -197,7 +184,10 @@ export class SessionSync {
   static async ping() {
     if (!this.baseUrl) { console.warn('nimrod-session | URL não configurada.'); return false; }
     try {
-      const res = await fetch(`${this.baseUrl}/health`);
+      // /health é registrado sem prefixo /api no backend — remove o /api
+      // que baseUrl acrescenta para os demais endpoints.
+      const rootUrl = this.baseUrl.replace(/\/api$/, '');
+      const res = await fetch(`${rootUrl}/health`);
       const ok  = res.ok || res.status === 404;
       console.log(`nimrod-session | Ping: ${ok ? '✅ OK' : '❌ FALHOU'} (${res.status})`);
       return ok;

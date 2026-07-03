@@ -1,5 +1,5 @@
 /**
- * scripts/main.js
+ * scripts/main.js — v4 (actorId + origem por userId)
  *
  * Nimrod Session — Resource Log
  * Entry point do módulo Foundry VTT.
@@ -11,39 +11,36 @@
  *   4. Botão na barra de cena para status rápido (v13/v14)
  *
  * Hooks escutados:
- *   updateActor   → ouro, XP, HP, espaços de magia
- *   createItem    → item adquirido / poção recebida
- *   deleteItem    → item consumido / removido
- *   deleteCombat  → marca fim de combate (HP final dos participantes)
+ *   updateActor   → ouro, XP, HP, espaços de magia (via registro RESOURCE_HANDLERS,
+ *                   ver ResourceHandlers.js — main.js não conhece nenhum
+ *                   recurso individualmente, apenas itera o registro)
+ *   createItem    → item adquirido / poção recebida (EventDetector)
+ *   deleteItem    → item consumido / removido (EventDetector)
+ *   deleteCombat  → marca fim de combate (HP final dos participantes, evento snapshot)
  *
- * Guarda de acesso:
- *   Todos os hooks verificam _canControl() antes de executar qualquer
- *   lógica. Só o responsável pela sessão envia eventos — evita
- *   duplicatas em sessões com múltiplos clientes.
+ * Controle de origem (não mais _canControl()/isGM):
+ *   Cada hook do Foundry recebe o `userId` de quem originou a mudança.
+ *   Todo hook compara esse userId contra `game.user.id` e só o cliente que
+ *   causou a edição envia o evento — isso vale tanto para o GM quanto para
+ *   PLAYERs editando suas próprias fichas, sem duplicar entre clientes
+ *   conectados simultaneamente:
  *
- *   _canControl() retorna true se:
- *     - game.user.isGM (role GM ou GM_PRINCIPAL no Foundry, que normalmente
- *       corresponde a GM/GM_PRINCIPAL no Nimrod), OU
- *     - o usuário autenticado no Nimrod é narrador da sessão ativa
- *       (verificado via GET /api/sessions/:id e comparando narrator_ids)
+ *     if (userId !== game.user.id) return;
+ *
+ * Identidade dos eventos:
+ *   Todo evento enviado carrega `actorId` (Foundry actor._id), nunca
+ *   `playerId`. O backend resolve playerId/characterId internamente via
+ *   player_characters.foundry_actor_id (ver resolveEventIdentity no
+ *   backend). O módulo Foundry não precisa mais de nenhum mapeamento
+ *   manual (PlayerMap) para enviar eventos de recurso — PlayerMap
+ *   permanece apenas como ferramenta de diagnóstico via console
+ *   (NimrodSession.players) e não é usado por nenhum hook automático.
  */
 
-/**
- * scripts/main.js — v3 (handshake architecture)
- *
- * Nimrod Session — Resource Log
- *
- * Mudanças v3:
- *   - Controle de acesso baseado em game.user.isGM + sessionId disponível
- *   - Não depende mais de JWT de lançamento ou sessionStorage
- *   - SessionSync usa X-Nimrod-Key em vez de JWT
- *   - Aguarda activeSessionId ficar disponível (propagado pelo nimrod-bridge)
- *   - Settings: nimrodApiKey substituiu nimrodToken
- */
-
-import { SessionSync }   from './SessionSync.js';
-import { EventDetector } from './EventDetector.js';
-import { PlayerMap }     from './PlayerMap.js';
+import { SessionSync }      from './SessionSync.js';
+import { EventDetector }    from './EventDetector.js';
+import { PlayerMap }        from './PlayerMap.js';
+import { RESOURCE_HANDLERS } from './ResourceHandlers.js';
 
 const MODULE_ID = 'nimrod-session';
 
@@ -112,210 +109,104 @@ Hooks.once('init', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2. CONTROLE DE ACESSO
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Retorna true se este cliente deve enviar eventos.
- * Apenas o GM do Foundry envia — evita duplicatas quando múltiplos
- * clientes estão no mesmo mundo.
- */
-function _canControl() {
-  return game.user.isGM;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 3. REGISTRO DE HOOKS (chamado quando sessionId fica disponível)
+// 2. REGISTRO DE HOOKS (chamado quando sessionId fica disponível)
 // ═══════════════════════════════════════════════════════════════════════════
 
 let _hooksRegistered = false;
 
 function _registerHooks() {
-  console.log("nimrod-session: REGISTER HOOKS");
   if (_hooksRegistered) return;
-  //  if (!_canControl())   return;
 
   _hooksRegistered = true;
   console.log('%cnimrod-session | Registrando hooks de recursos…', 'color:#4a9a6a');
 
-  // Cache pré-update para deltas de moeda precisos
+  // Cache pré-update — captura o estado do actor ANTES da mudança ser
+  // aplicada (necessário porque, no hook `updateActor`, o actor recebido
+  // já reflete o estado PÓS-update). Genérico: itera RESOURCE_HANDLERS e
+  // chama snapshot() apenas para os recursos que `changes` de fato tocou.
+  // Adicionar um novo recurso rastreável não exige tocar este bloco —
+  // apenas registrar uma nova entrada em ResourceHandlers.js.
   const preUpdateCache = new Map();
 
-  // Hooks.on('preUpdateActor', (actor, changes) => {
-  //   const hasCurrency = changes?.system?.currency;
-  //   const hasHp       = changes?.system?.attributes?.hp;
-  //   if (!hasCurrency && !hasHp) return;
-  //   preUpdateCache.set(actor.id, {
-  //     currency: hasCurrency ? { ...actor.system?.currency } : null,
-  //     hp:       hasHp       ? { ...actor.system?.attributes?.hp } : null,
-  //   });
-  //   if (preUpdateCache.size > 100) preUpdateCache.delete(preUpdateCache.keys().next().value);
-  // });
-
   Hooks.on('preUpdateActor', (actor, changes, options, userId) => {
+    if (userId !== game.user.id) return; // só quem originou a mudança guarda snapshot
 
-    // Apenas quem originou a alteração mantém o snapshot
-    if (userId !== game.user.id) return;
+    const sys = changes?.system ?? {};
+    const snapshot = {};
 
-    const hasCurrency = changes?.system?.currency;
-    const hasHp = changes?.system?.attributes?.hp;
-    const hasXp = changes?.system?.details?.xp;
+    for (const [key, handler] of Object.entries(RESOURCE_HANDLERS)) {
+      if (foundry.utils.getProperty(sys, handler.path) !== undefined) {
+        snapshot[key] = handler.snapshot(actor);
+      }
+    }
 
-    if (!hasCurrency && !hasHp && !hasXp) return;
+    if (Object.keys(snapshot).length === 0) return;
 
-    preUpdateCache.set(actor.id, {
-      currency: hasCurrency ? { ...actor.system?.currency } : null,
-      hp: hasHp ? { ...actor.system?.attributes?.hp } : null,
-      xp: hasXp ? { ...actor.system?.details?.xp } : null,
-//      xp: foundry.utils.deepClone(actor.system.details.xp),
-    });
-
+    preUpdateCache.set(actor.id, snapshot);
     if (preUpdateCache.size > 100) {
       preUpdateCache.delete(preUpdateCache.keys().next().value);
     }
   });
 
-  console.log("register updateActor");
-  Hooks.on(
-    "updateActor",
-    async (actor, changes, options, userId) => {
+  Hooks.on('updateActor', async (actor, changes, options, userId) => {
+    if (userId !== game.user.id) return; // só quem originou a mudança envia
 
-      // Apenas o cliente que originou a alteração envia
-      if (userId !== game.user.id)
-        return;
-
-      console.log("UPDATE HOOK NIMROD", actor.name, changes);
-      console.log({
-          actor: actor.name,
-          hookUserId: userId,
-          localUserId: game.user.id,
-          localUser: game.user.name,
-          isGM: game.user.isGM
-      });
-
-      const onlyOwned = game.settings.get(MODULE_ID, "onlyPlayerOwned");
-
-      if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== "character"))
-        return;
-
-      if (!SessionSync.activeSessionId)
-        return;
-
-/*       const playerId = PlayerMap.getNimrodId(actor);
-
-      if (!playerId) {
-        console.debug(
-            `nimrod-session | Ignorando actor não mapeado: ${actor.name}`
-        );
-          return;
-      } */
-
-      let events = EventDetector.fromActorUpdate(actor, changes);
-
-      console.log(events);
-
-      if (!game.settings.get(MODULE_ID, "trackHp")) {
-        events = events.filter(e => e.resourceType !== "hp");
-      }
-
-      const pre = preUpdateCache.get(actor.id);
-
-      if (pre) {
-        for (const ev of events) {
-
-          if (ev.resourceType === "gold" && pre.currency) {
-
-            const RATES = {
-              pp: 10,
-              gp: 1,
-              ep: 0.5,
-              sp: 0.1,
-              cp: 0.01
-            };
-
-            const before = Object.entries(pre.currency)
-              .reduce((s,[c,v]) => s + Number(v) * (RATES[c] ?? 0), 0);
-
-            const after = Object.entries(actor.system?.currency ?? {})
-              .reduce((s,[c,v]) => s + Number(v) * (RATES[c] ?? 0), 0);
-
-            ev.delta = Math.round((after - before) * 100) / 100;
-            ev.valueBefore = Math.round(before * 100) / 100;
-            ev.valueAfter = Math.round(after * 100) / 100;
-
-            ev.description =
-              ev.delta < 0
-                ? `Gastou ${Math.abs(ev.delta)} po (${actor.name})`
-                : `Recebeu ${ev.delta} po (${actor.name})`;
-          }
-
-          if (ev.resourceType === "hp" && pre.hp) {
-              ev.valueBefore = Number(pre.hp.value ?? 0);
-              ev.valueAfter = Number(actor.system.attributes.hp.value ?? 0);
-              ev.delta = ev.valueAfter - ev.valueBefore;
-
-              ev.deltaMeta = {
-                  max_hp: Number(actor.system.attributes.hp.max ?? 0)
-              };
-
-              ev.description =
-                  ev.delta < 0
-                      ? `${actor.name} perdeu ${Math.abs(ev.delta)} HP`
-                      : `${actor.name} recuperou ${ev.delta} HP`;
-          }
-
-          if (ev.resourceType === "xp" && pre.xp) {
-              ev.valueBefore = Number(pre.xp.value ?? 0);
-              ev.valueAfter  = Number(actor.system.details.xp.value ?? 0);
-              ev.delta       = ev.valueAfter - ev.valueBefore;
-
-              ev.description =
-                  ev.delta < 0
-                      ? `${actor.name} perdeu ${Math.abs(ev.delta)} XP`
-                      : `${actor.name} recebeu ${ev.delta} XP`;
-          }
-        }
-
-        preUpdateCache.delete(actor.id);
-      }
-
-      for (const ev of events) {
-
-        if (ev.delta === 0)
-          continue;
-
-        await SessionSync.sendEvent({
-          actorId: actor.id,
-          actorName: actor.name,
-          ...ev,
-          foundryEventId: `${game.world.id}-${actor.id}-${ev.resourceType}-${Date.now()}`
-        });
-      }
-    }
-  );
-  console.log("register createItem");
-  Hooks.on('createItem', async (item) => {
-    if (!game.settings.get(MODULE_ID, 'trackItems')) return;
-    const actor = item.parent;
-    if (!(actor instanceof Actor)) return;
     const onlyOwned = game.settings.get(MODULE_ID, 'onlyPlayerOwned');
     if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== 'character')) return;
     if (!SessionSync.activeSessionId) return;
-    const playerId = PlayerMap.getNimrodId(actor);
-    if (!playerId) return;
+    if (!actor.id) return;
+
+    const trackHp = game.settings.get(MODULE_ID, 'trackHp');
+    const pre = preUpdateCache.get(actor.id) ?? {};
+    preUpdateCache.delete(actor.id);
+
+    // Itera o registro de recursos — cada handler decide, com base em seu
+    // próprio snapshot pré-update, se algo de fato mudou e monta o(s)
+    // evento(s) completos (delta/before/after/description já resolvidos).
+    const events = [];
+    for (const [key, handler] of Object.entries(RESOURCE_HANDLERS)) {
+      if (key === 'hp' && !trackHp) continue; // respeita a setting trackHp
+      events.push(...handler.complete(actor, changes, pre[key]));
+    }
+
+    for (const ev of events) {
+      // Defensivo: handlers já filtram delta=0 internamente (exceto
+      // snapshots explícitos, que não passam por este hook — ver
+      // deleteCombat abaixo). Mantido como rede de segurança.
+      if (ev.delta === 0 && !ev.deltaMeta?.snapshot) continue;
+
+      await SessionSync.sendEvent({
+        actorId: actor.id,
+        actorName: actor.name,
+        ...ev,
+        foundryEventId: `${game.world.id}-${actor.id}-${ev.resourceType}-${Date.now()}`,
+      });
+    }
+  });
+
+  console.log("register createItem");
+  Hooks.on('createItem', async (item, options, userId) => {
+    if (userId !== game.user.id) return; // só quem originou a mudança envia
+    if (!game.settings.get(MODULE_ID, 'trackItems')) return;
+    const actor = item.parent;
+    if (!(actor instanceof Actor) || !actor.id) return;
+    const onlyOwned = game.settings.get(MODULE_ID, 'onlyPlayerOwned');
+    if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== 'character')) return;
+    if (!SessionSync.activeSessionId) return;
     const ev = EventDetector.fromItemCreate(actor, item);
     if (!ev) return;
     await SessionSync.sendEvent({
-      playerId, actorName: actor.name, ...ev,
+      actorId: actor.id, actorName: actor.name, ...ev,
       foundryEventId: `${game.world.id}-createItem-${item.id}-${Date.now()}`,
     });
   });
   console.log("register deleteItem");
-  Hooks.on('deleteItem', async (item) => {
+  Hooks.on('deleteItem', async (item, options, userId) => {
+    if (userId !== game.user.id) return; // só quem originou a mudança envia
     if (!game.settings.get(MODULE_ID, 'trackItems')) return;
 
     const actor = item.parent;
-    if (!(actor instanceof Actor)) return;
+    if (!(actor instanceof Actor) || !actor.id) return;
 
     const onlyOwned = game.settings.get(MODULE_ID, 'onlyPlayerOwned');
     if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== 'character')) return;
@@ -333,17 +224,21 @@ function _registerHooks() {
     });
   });
 
-  Hooks.on('deleteCombat', async (combat) => {
+  Hooks.on('deleteCombat', async (combat, options, userId) => {
+    if (userId !== game.user.id) return; // só quem originou o encerramento envia
     if (!game.settings.get(MODULE_ID, 'trackHp'))  return;
     if (!SessionSync.activeSessionId)               return;
     for (const combatant of (combat.combatants?.contents ?? [])) {
       const actor = combatant.actor;
-      if (!actor || actor.type !== 'character' || !actor.hasPlayerOwner) continue;
-      const playerId = PlayerMap.getNimrodId(actor);
-      if (!playerId) continue;
+      if (!actor?.id || actor.type !== 'character' || !actor.hasPlayerOwner) continue;
       const hp = actor.system?.attributes?.hp ?? {};
+      // Convenção: este é um evento SNAPSHOT (estado pontual de HP ao fim
+      // do combate, não uma variação) — por isso delta=0 é intencional e
+      // aceito pelo backend apenas quando deltaMeta.snapshot === true. Todo
+      // outro evento com delta=0 é descartado (ver updateActor abaixo, que
+      // pula eventos com `ev.delta === 0`).
       await SessionSync.sendEvent({
-        playerId, actorName: actor.name,
+        actorId: actor.id, actorName: actor.name,
         resourceType: 'hp', delta: 0,
         valueBefore: null, valueAfter: Number(hp.value ?? 0),
         deltaMeta: { snapshot: true, max_hp: Number(hp.max ?? 0), combat_id: combat.id },
@@ -391,16 +286,15 @@ function _registerHooks() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 4. READY
+// 3. READY
 // ═══════════════════════════════════════════════════════════════════════════
 
 Hooks.once('ready', () => {
   _exposeApi();
 
-  // if (!_canControl()) {
-  //   console.log('nimrod-session | Usuário não é GM — hooks de sync não registrados.');
-  //   return;
-  // }
+  // Hooks são registrados para QUALQUER usuário (GM ou PLAYER) — o filtro
+  // de origem acontece dentro de cada handler via comparação de userId
+  // (ver comentário no topo do arquivo).
 
   // Se o sessionId já está disponível (reload com sessão em andamento), registra imediatamente
   if (SessionSync.activeSessionId) {
@@ -413,26 +307,31 @@ Hooks.once('ready', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 5. API GLOBAL
+// 4. API GLOBAL
 // ═══════════════════════════════════════════════════════════════════════════
 
 function _exposeApi() {
   window.NimrodSession = {
     sync:     SessionSync,
-    players:  PlayerMap,
+    players:  PlayerMap, // diagnóstico via console apenas — não usado por hooks
     detector: EventDetector,
+
+    /**
+     * Envia um evento manualmente via console do Foundry.
+     * Resolve actorId pelo nome do ator no mundo atual — não depende de
+     * PlayerMap nem de nenhum mapeamento manual.
+     *
+     * Exemplo:
+     *   await NimrodSession.log("Thorin", "gold", -50, { description: "Comprou poção" })
+     */
     async log(actorName, type, delta, opts = {}) {
-      let playerId = opts.playerId;
-      if (!playerId) {
-        const actor = game.actors?.find(a => a.name === actorName);
-        if (actor) playerId = PlayerMap.getNimrodId(actor);
-      }
-      if (!playerId) {
-        console.error(`nimrod-session | log: playerId não encontrado para "${actorName}".`);
+      const actor = game.actors?.find(a => a.name === actorName);
+      if (!actor) {
+        console.error(`nimrod-session | log: ator "${actorName}" não encontrado no mundo.`);
         return null;
       }
       return SessionSync.sendEvent({
-        playerId, actorName, resourceType: type, delta,
+        actorId: actor.id, actorName, resourceType: type, delta,
         description: opts.description ?? null,
         deltaMeta:   opts.deltaMeta   ?? {},
         valueBefore: opts.valueBefore ?? null,
@@ -444,23 +343,15 @@ function _exposeApi() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 6. HELPERS
+// 5. HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
-
-const _warnCooldowns = new Map();
-function _warnMissing(actor) {
-  const now = Date.now();
-  if ((now - (_warnCooldowns.get(actor.id) ?? 0)) < 60_000) return;
-  _warnCooldowns.set(actor.id, now);
-  console.warn(`nimrod-session | "${actor.name}" sem mapeamento. Use NimrodSession.players.autoDiscover()`);
-}
 
 function _logStatus() {
   console.group('%cnimrod-session | Status na inicialização', 'color:#c9a84c;font-weight:bold');
-  console.log('Sync:          ', SessionSync.enabled);
-  console.log('URL:           ', SessionSync.baseUrl || '(não configurada)');
-  console.log('API Key:       ', SessionSync.apiKey ? '✅' : '⚠️ ausente');
-  console.log('Sessão ativa:  ', SessionSync.activeSessionId || '(aguardando handshake)');
-  console.log('PlayerMap:     ', Object.keys(PlayerMap.getAll()).length, 'jogadores');
+  console.log('Sync:              ', SessionSync.enabled);
+  console.log('URL:               ', SessionSync.baseUrl || '(não configurada)');
+  console.log('API Key:           ', SessionSync.apiKey ? '✅' : '⚠️ ausente');
+  console.log('Sessão ativa:      ', SessionSync.activeSessionId || '(aguardando handshake)');
+  console.log('Hooks registrados: ', _hooksRegistered ? '✅' : '⏳ aguardando');
   console.groupEnd();
 }

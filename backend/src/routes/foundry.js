@@ -2,7 +2,8 @@ import { query } from '../db/index.js';
 import { signFoundryToken, verifyFoundryToken } from '../services/foundryAuth.js';
 import { resolveFoundryMapping } from '../services/foundryMap.js';
 import { readFoundryActorsDb, syncFoundryActors, upsertFoundryActors } from '../services/foundrySync.js';
-import { resolveActorOwnership } from '../services/actorResolution.js';
+import { resolveEventIdentity } from '../services/actorResolution.js';
+import { isFoundryRequest } from '../lib/foundryAuth.js';
 import { isGM, isGMPrincipal, isAdmin, requireGM, requireGMPrincipal, requireAdmin } from '../lib/roles.js';
 import { broadcast } from "../ws/broadcast.js";
 
@@ -257,13 +258,7 @@ export async function foundryRoutes(fastify) {
   // Body: { worldId, gmName?, players?, tokens? }
   // Retorna: { code, expiresAt }
   fastify.post('/nimrod/handshake', async (req, reply) => {
-    const sentKey       = req.headers['x-nimrod-key'];
-    const configuredKey = process.env.FOUNDRY_API_KEY?.trim();
-    if (!configuredKey) return reply.code(503).send({ error: 'Not configured.' });
-    const { timingSafeEqual } = await import('node:crypto');
-    const valid = sentKey?.length === configuredKey.length &&
-      timingSafeEqual(Buffer.from(sentKey), Buffer.from(configuredKey));
-    if (!valid) return reply.code(401).send({ error: 'Invalid API key.' });
+    if (!(await isFoundryRequest(req))) return reply.code(401).send({ error: 'Invalid API key.' });
 
     const { worldId, gmName = null, players = [], tokens = [] } = req.body ?? {};
     if (!worldId?.trim()) return reply.code(400).send({ error: 'worldId é obrigatório.' });
@@ -322,13 +317,7 @@ export async function foundryRoutes(fastify) {
   //   { linked: true, sessionId, missionId }         → sessão vinculada
   //   404                                            → código não encontrado ou expirado
   fastify.get('/nimrod/handshake/status', async (req, reply) => {
-    const sentKey       = req.headers['x-nimrod-key'];
-    const configuredKey = process.env.FOUNDRY_API_KEY?.trim();
-    if (!configuredKey) return reply.code(503).send({ error: 'Not configured.' });
-    const { timingSafeEqual } = await import('node:crypto');
-    const valid = sentKey?.length === configuredKey.length &&
-      timingSafeEqual(Buffer.from(sentKey), Buffer.from(configuredKey));
-    if (!valid) return reply.code(401).send({ error: 'Invalid API key.' });
+    if (!(await isFoundryRequest(req))) return reply.code(401).send({ error: 'Invalid API key.' });
 
     const { code } = req.query;
     if (!code?.trim()) return reply.code(400).send({ error: 'code é obrigatório.' });
@@ -371,19 +360,17 @@ export async function foundryRoutes(fastify) {
   // eventType: 'enter' | 'leave' | 'reconnect'
   //
   // Resolução de identidade (em ordem):
-  //   1. user_foundry_map.actor_name = characterName  → resolve email → users.id
-  //   2. user_foundry_map.actor_name = foundryName    → idem
-  //   3. player_characters.foundry_actor_id = actorId → resolve user_id diretamente
-  //   4. foundryName match em users.name / display_name (fallback)
+  //   1. resolveEventIdentity({ actorId, actorName: characterName }) — mesma
+  //      função usada por POST /sessions/:id/events. Só resolve personagens
+  //      já sincronizados (foundry_actor_id preenchido).
+  //   2. Fallbacks específicos de presença (mais permissivos, pois presença
+  //      é "melhor esforço": rastrear quem está online não exige que o
+  //      personagem já tenha sido sincronizado com o Foundry):
+  //        a. user_foundry_map.actor_name = characterName ou foundryName
+  //        b. users.name / display_name = foundryName
   // Se nenhuma resolução funcionar, registra apenas o WS event (sem DB insert).
   fastify.post('/nimrod/session/presence', async (req, reply) => {
-    const sentKey       = req.headers['x-nimrod-key'];
-    const configuredKey = process.env.FOUNDRY_API_KEY?.trim();
-    if (!configuredKey) return reply.code(503).send({ error: 'Not configured.' });
-    const { timingSafeEqual } = await import('node:crypto');
-    const valid = sentKey?.length === configuredKey.length &&
-      timingSafeEqual(Buffer.from(sentKey), Buffer.from(configuredKey));
-    if (!valid) return reply.code(401).send({ error: 'Invalid API key.' });
+    if (!(await isFoundryRequest(req))) return reply.code(401).send({ error: 'Invalid API key.' });
 
     const {
       sessionId,
@@ -415,30 +402,14 @@ export async function foundryRoutes(fastify) {
     let userId      = null;
     let characterId = null;
 
-    // 1. Tenta via resolução compartilhada (player_characters.foundry_actor_id)
-    const ownership = await resolveActorOwnership(actorId);
-    if (ownership) {
-      userId      = ownership.userId;
-      characterId = ownership.characterId;
+    // 1. Resolução compartilhada — mesma função usada por /sessions/:id/events
+    const identity = await resolveEventIdentity({ actorId, actorName: characterName ?? foundryName });
+    if (identity) {
+      userId      = identity.playerId;
+      characterId = identity.characterId;
     }
 
-    // 2. Tenta via player_characters.name = characterName
-    if (!userId && characterName) {
-      const pcRes = await query(
-        `SELECT pc.id AS character_id, pc.user_id
-         FROM player_characters pc
-         WHERE LOWER(pc.name) = LOWER($1)
-           AND pc.active = TRUE AND pc.retired = FALSE
-         LIMIT 1`,
-        [characterName],
-      );
-      if (pcRes.rows.length) {
-        userId      = pcRes.rows[0].user_id;
-        characterId = pcRes.rows[0].character_id;
-      }
-    }
-
-    // 3. Tenta via user_foundry_map.actor_name = characterName ou foundryName
+    // 2. Fallback específico de presença: user_foundry_map (email → role/actor)
     if (!userId) {
       const lookupName = characterName ?? foundryName;
       const fmRes = await query(
@@ -452,7 +423,7 @@ export async function foundryRoutes(fastify) {
       if (fmRes.rows.length) userId = fmRes.rows[0].user_id;
     }
 
-    // 4. Fallback: users.name ou display_name = foundryName
+    // 3. Fallback: users.name ou display_name = foundryName
     if (!userId && foundryName) {
       const uRes = await query(
         `SELECT id FROM users
@@ -513,13 +484,7 @@ export async function foundryRoutes(fastify) {
   //
   // Query: ?sessionId=<uuid>
   fastify.get('/nimrod/session/status', async (req, reply) => {
-    const sentKey       = req.headers['x-nimrod-key'];
-    const configuredKey = process.env.FOUNDRY_API_KEY?.trim();
-    if (!configuredKey) return reply.code(503).send({ error: 'Not configured.' });
-    const { timingSafeEqual } = await import('node:crypto');
-    const valid = sentKey?.length === configuredKey.length &&
-      timingSafeEqual(Buffer.from(sentKey), Buffer.from(configuredKey));
-    if (!valid) return reply.code(401).send({ error: 'Invalid API key.' });
+    if (!(await isFoundryRequest(req))) return reply.code(401).send({ error: 'Invalid API key.' });
 
     const { sessionId } = req.query;
     if (!sessionId) return reply.code(400).send({ error: 'sessionId é obrigatório.' });
@@ -632,21 +597,11 @@ export async function foundryRoutes(fastify) {
   fastify.post('/foundry/push-actors', async (req, reply) => {
     reply.header('Access-Control-Allow-Origin', '*');
 
-    const sentKey       = req.headers['x-nimrod-key'];
-    const configuredKey = process.env.FOUNDRY_API_KEY?.trim();
-
-    if (!configuredKey) {
-      req.log.error('FOUNDRY_API_KEY is not set');
-      return reply.code(503).send({ error: 'Service not configured' });
-    }
-
-    // Comparação em tempo constante — previne timing attacks
-    const { timingSafeEqual } = await import('node:crypto');
-    const valid =
-      sentKey?.length === configuredKey.length &&
-      timingSafeEqual(Buffer.from(sentKey), Buffer.from(configuredKey));
-
-    if (!valid) {
+    if (!(await isFoundryRequest(req))) {
+      if (!process.env.FOUNDRY_API_KEY?.trim()) {
+        req.log.error('FOUNDRY_API_KEY is not set');
+        return reply.code(503).send({ error: 'Service not configured' });
+      }
       req.log.warn({ ip: req.ip }, 'push-actors: invalid API key');
       return reply.code(401).send({ error: 'Invalid API key' });
     }

@@ -27,7 +27,8 @@ import { query } from '../db/index.js';
 import { broadcast } from '../ws/broadcast.js';
 import { assertRateLimit } from '../middleware/rateLimit.js';
 import { isGM, isGMPrincipal, requireGM, requireGMPrincipal } from '../lib/roles.js';
-import { resolveActorOwnership } from '../services/actorResolution.js';
+import { isFoundryRequest } from '../lib/foundryAuth.js';
+import { resolveEventIdentity } from '../services/actorResolution.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Serializers
@@ -159,8 +160,8 @@ function validateSessionBody(body, reply) {
 function validateEventBody(body, reply) {
   // playerId OU actorId — não ambos exigidos. Requisições do módulo Foundry
   // enviam apenas actorId; a rota resolve playerId/characterId internamente
-  // via resolveActorOwnership() antes de chegar aqui.
-  const { playerId, actorId, actorName, characterId, resourceType, delta } = body ?? {};
+  // via resolveEventIdentity() antes de chegar aqui.
+  const { playerId, actorId, actorName, characterId, resourceType, delta, deltaMeta } = body ?? {};
 
   if (!playerId?.trim() && !actorId?.trim()) {
     reply.code(400).send({ error: 'playerId ou actorId é obrigatório.' });
@@ -177,8 +178,13 @@ function validateEventBody(body, reply) {
     });
     return false;
   }
-  if (typeof delta !== 'number' || delta === 0 || !isFinite(delta)) {
-    reply.code(400).send({ error: 'delta deve ser um número diferente de zero.' });
+  // Convenção: delta = 0 só é aceito quando deltaMeta.snapshot === true (ex:
+  // HP final registrado em deleteCombat — não representa uma variação, mas
+  // um estado pontual). Qualquer outro evento com delta 0 é rejeitado, pois
+  // não haveria nada de fato a registrar.
+  const isSnapshot = deltaMeta?.snapshot === true;
+  if (typeof delta !== 'number' || !isFinite(delta) || (delta === 0 && !isSnapshot)) {
+    reply.code(400).send({ error: 'delta deve ser um número diferente de zero (exceto eventos snapshot, com deltaMeta.snapshot=true).' });
     return false;
   }
   return true;
@@ -614,20 +620,12 @@ export async function sessionRoutes(fastify) {
   //
   // Dois caminhos de autenticação (ver hook global em index.js):
   //   1. X-Nimrod-Key (módulo Foundry) — sem req.user. Envia apenas `actorId`;
-  //      resolveActorOwnership() traduz para playerId/characterId. O módulo
-  //      não precisa conhecer o usuário do Nimrod.
+  //      resolveEventIdentity() traduz para playerId/characterId/actorName —
+  //      exatamente a mesma função usada por POST /nimrod/session/presence.
   //   2. Cloudflare Access (GM/GM_PRINCIPAL via UI do Nimrod) — fluxo original,
   //      exige playerId explícito e checa narrator_ids.
   fastify.post('/sessions/:id/events', async (req, reply) => {
-    const sentKey       = req.headers['x-nimrod-key'];
-    const configuredKey = process.env.FOUNDRY_API_KEY?.trim();
-    let isFoundryOrigin = false;
-
-    if (sentKey && configuredKey) {
-      const { timingSafeEqual } = await import('node:crypto');
-      isFoundryOrigin = sentKey.length === configuredKey.length &&
-        timingSafeEqual(Buffer.from(sentKey), Buffer.from(configuredKey));
-    }
+    const isFoundryOrigin = await isFoundryRequest(req);
 
     // requireGM só se aplica a chamadas humanas — a origem Foundry já foi
     // validada acima pela API key (não depende de req.user).
@@ -669,6 +667,7 @@ export async function sessionRoutes(fastify) {
       playerId       = null,
       actorId        = null,
       characterId    = null,
+      actorName      = null,
       resourceType,
       delta,
       valueBefore    = null,
@@ -682,30 +681,21 @@ export async function sessionRoutes(fastify) {
 
     const resolvedSource = VALID_SOURCES.has(source) ? source : (isFoundryOrigin ? 'foundry' : 'manual');
 
-    let resolvedPlayerId    = playerId;
-    let resolvedCharacterId = characterId;
-    let resolvedActorName   = req.body.actorName?.trim() ?? null;
-
-    // ── Resolução via actorId (módulo Foundry não conhece o playerId) ────────
-    // Usa a função compartilhada com /nimrod/session/presence. Só resolve
-    // personagens já sincronizados (foundry_actor_id preenchido) — essa é
-    // a regra aceita do sistema: personagem nunca sincronizado não gera
-    // eventos automáticos até sincronizar pelo menos uma vez.
-    if (!resolvedPlayerId && actorId) {
-      const ownership = await resolveActorOwnership(actorId);
-      if (!ownership) {
-        return reply.code(400).send({
-          error: `Nenhum personagem sincronizado encontrado para o actorId "${actorId}". Sincronize o personagem (foundry_actor_id) antes de registrar eventos.`,
-        });
-      }
-      resolvedPlayerId    = ownership.userId;
-      resolvedCharacterId = resolvedCharacterId ?? ownership.characterId;
-      resolvedActorName = resolvedActorName ?? ownership.actorName ?? ownership.characterName;
+    // Resolução única de identidade — mesma função usada por
+    // POST /nimrod/session/presence. Regra estrita: actorId só resolve
+    // se o personagem já foi sincronizado (foundry_actor_id preenchido).
+    const identity = await resolveEventIdentity({ playerId, actorId, characterId, actorName });
+    if (!identity) {
+      return reply.code(400).send(
+        actorId
+          ? { error: `Nenhum personagem sincronizado encontrado para o actorId "${actorId}". Sincronize o personagem (foundry_actor_id) antes de registrar eventos.` }
+          : { error: 'Não foi possível resolver playerId/actorName/characterId — verifique os dados enviados.' },
+      );
     }
 
-    if (!resolvedPlayerId) {
-      return reply.code(400).send({ error: 'playerId ou actorId é obrigatório.' });
-    }
+    const resolvedPlayerId    = identity.playerId;
+    const resolvedCharacterId = identity.characterId;
+    const resolvedActorName   = identity.actorName;
 
     // Verifica se jogador existe
     if (!isValidUuid(resolvedPlayerId)) {
@@ -729,61 +719,6 @@ export async function sessionRoutes(fastify) {
         [sl.mission_id, resolvedPlayerId],
       );
       participant = participantCheck.rows.length > 0;
-    }
-
-    // Resolve actorName/characterId quando characterId foi fornecido
-    // explicitamente (não veio da resolução por actorId acima)
-    if (characterId && characterId === resolvedCharacterId) {
-      if (!isValidUuid(resolvedCharacterId)) {
-        return reply.code(400).send({ error: `characterId inválido: "${characterId}". Deve ser um UUID.` });
-      }
-      const charCheck = await query(
-        `SELECT id, name, user_id, active, retired, dead
-         FROM player_characters
-         WHERE id = $1`,
-        [resolvedCharacterId],
-      );
-
-      if (!charCheck.rows.length) {
-        return reply.code(400).send({ error: 'Personagem não encontrado.' });
-      }
-
-      const ch = charCheck.rows[0];
-
-      if (ch.user_id !== resolvedPlayerId) {
-        return reply.code(400).send({ error: 'Personagem não pertence ao jogador informado.' });
-      }
-      if (!ch.active) {
-        return reply.code(400).send({ error: 'Personagem inativo.' });
-      }
-      if (ch.retired) {
-        return reply.code(400).send({ error: 'Personagem aposentado.' });
-      }
-      if (ch.dead) {
-        return reply.code(400).send({ error: 'Personagem morto.' });
-      }
-
-      resolvedActorName = ch.name;
-    }
-
-    if (!resolvedActorName) {
-      return reply.code(400).send({ error: 'actorName, characterId ou actorId válido é obrigatório.' });
-    }
-
-    if (!resolvedCharacterId) {
-      const charByName = await query(
-        `SELECT id
-         FROM player_characters
-         WHERE user_id = $1
-           AND lower(name) = lower($2)
-           AND active = TRUE
-           AND retired = FALSE
-           AND dead = FALSE
-         ORDER BY updated_at DESC NULLS LAST
-         LIMIT 1`,
-        [resolvedPlayerId, resolvedActorName],
-      );
-      resolvedCharacterId = charByName.rows[0]?.id ?? null;
     }
 
     // registered_by: chamadas humanas usam req.user.id; chamadas do módulo
