@@ -20,6 +20,8 @@ import {
   ChevronLeft, ChevronRight, Pencil, History, X, Loader2,
 } from 'lucide-react';
 import { getSeasonConfig, getSeasonImage } from '../config/calendarSeasons.js';
+import { getEffectIcon, getEffectBadge } from '../config/seasonEffectDisplay.js';
+import { SeasonEffectsEditor } from '../components/SeasonEffectsEditor.jsx';
 
 function SeasonProgressBar({ week, color }) {
   const pct = (week / 12) * 100;
@@ -140,6 +142,11 @@ export default function CalendarPage() {
     return unsub;
   }, [on]);
 
+  useEffect(() => {
+    const unsub = on('SEASON_EFFECTS_UPDATED', () => load());
+    return unsub;
+  }, [on, load]);
+
   async function runAction(fn) {
     setBusy(true);
     setError(null);
@@ -229,11 +236,15 @@ export default function CalendarPage() {
         </div>
 
         <div className="cal-effects">
-          {season.effects.map(({ icon: Icon, text }, i) => (
-            <span key={i} className="cal-effect-chip" style={{ borderColor: season.accentColor + '40', color: season.accentColor }}>
-              <Icon size={12} /> {text}
-            </span>
-          ))}
+          {(state.effects || []).map((effect) => {
+            const Icon = getEffectIcon(effect);
+            const badge = getEffectBadge(effect);
+            return (
+              <span key={effect.id} className="cal-effect-chip" style={{ borderColor: season.accentColor + '40', color: season.accentColor }}>
+                <Icon size={12} /> {effect.label}{badge ? ` · ${badge}` : ''}
+              </span>
+            );
+          })}
         </div>
 
         <div className="cal-footer-meta">
@@ -275,6 +286,8 @@ export default function CalendarPage() {
           </div>
         </div>
       )}
+
+      {gm && <SeasonEffectsEditor currentSeasonKey={season.key} />}
 
       {showSetModal && (
         <SetSessionModal

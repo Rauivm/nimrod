@@ -37,7 +37,10 @@ import { startFoundryActorSyncJob } from './services/foundrySync.js';
 import { patchNoteRoutes } from './routes/patchNotes.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { arcRoutes }     from './routes/arcs.js';
+import { sessionEventRoutes } from './routes/sessionEvents.js';
 import { calendarRoutes } from './routes/calendar.js';
+import { seasonEffectsRoutes } from './routes/seasonEffects.js';
+
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
@@ -115,16 +118,19 @@ fastify.addHook('onRequest', async (req, reply) => {
     path === '/nimrod/session/presence' ||
     path === '/nimrod/session/status'   ||
     path === '/nimrod/session/enter'    ||
+    path === '/nimrod/calendar/status'  ||
     path === '/nimrod/session/leave'    ||
+    path === '/nimrod/actor-map'        ||    
     path === '/foundry/push-actors'       // autenticado por X-Nimrod-Key na rota
   ) return;
-
+  // POST /sessions/:id/events e POST /sessions/:id/session-events aceitam
+  // dois caminhos de autenticação:
   // POST /sessions/:id/events aceita dois caminhos de autenticação:
   //   - Cloudflare Access (humano, via UI do Nimrod) → segue o fluxo normal abaixo
   //   - X-Nimrod-Key (módulo Foundry) → pula cfAuthMiddleware; a própria rota
   //     valida a chave novamente (via isFoundryRequest) e não depende de req.user.
   // Chave ausente ou inválida cai no fluxo normal (nega acesso não autenticado).
-  if (/^\/sessions\/[^/]+\/events$/.test(path) && req.method === 'POST') {
+  if (/^\/sessions\/[^/]+\/(events|session-events)$/.test(path) && req.method === 'POST') {
     if (await isFoundryRequest(req)) return; // rota trata como origem Foundry
   }
 
@@ -142,6 +148,8 @@ await fastify.register(mapRoutes);
 await fastify.register(foundryRoutes);
 await fastify.register(profileRoutes);
 await fastify.register(sessionRoutes);
+await fastify.register(sessionEventRoutes);
+await fastify.register(seasonEffectsRoutes);
 await fastify.register(arcRoutes);
 await fastify.register(patchNoteRoutes);
 await fastify.register(calendarRoutes);

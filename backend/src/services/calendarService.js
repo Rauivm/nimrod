@@ -36,6 +36,22 @@ export const SESSIONS_PER_SEASON  = 12;
 // Mudar a ordem sazonal do mundo = mudar só este array.
 export const SEASON_ORDER = ['Inverno', 'Primavera', 'Verão', 'Outono'];
 
+// Ponte entre o nome pt-BR retornado por este serviço e a chave usada por
+// season_effects e pelo config visual do frontend (calendarSeasons.js).
+// Única fonte dessa tradução — nada mais no projeto deve reimplementá-la.
+export const SEASON_KEY_BY_NAME = {
+  Inverno: 'WINTER',
+  Primavera: 'SPRING',
+  Verão: 'SUMMER',
+  Outono: 'AUTUMN',
+};
+
+export function getSeasonKey(seasonName) {
+  const key = SEASON_KEY_BY_NAME[seasonName];
+  if (!key) throw new CalendarError(`Estação sem chave mapeada: "${seasonName}"`);
+  return key;
+}
+
 const SEASONS_PER_YEAR = SEASON_ORDER.length; // 4
 
 // ─── Cálculo puro (sem I/O) ─────────────────────────────────────────────────

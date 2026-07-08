@@ -28,6 +28,7 @@ import { broadcast } from '../ws/broadcast.js';
 import { assertRateLimit } from '../middleware/rateLimit.js';
 import { isGM, isGMPrincipal, requireGM, requireGMPrincipal } from '../lib/roles.js';
 import { isFoundryRequest } from '../lib/foundryAuth.js';
+import { isValidUuid } from '../lib/validation.js';
 import { resolveEventIdentity } from '../services/actorResolution.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,12 +107,6 @@ const SESSION_SELECT = `
          ON rd.session_id = sl.id AND rd.deleted_at IS NULL
 `;
 
-// Regex UUID v4 — evita que strings inválidas causem erro 500 no PostgreSQL
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function isValidUuid(v) {
-  return typeof v === 'string' && UUID_RE.test(v);
-}
 
 async function fetchSession(id) {
   if (!isValidUuid(id)) return null;
@@ -161,6 +156,11 @@ function validateEventBody(body, reply) {
   // playerId OU actorId — não ambos exigidos. Requisições do módulo Foundry
   // enviam apenas actorId; a rota resolve playerId/characterId internamente
   // via resolveEventIdentity() antes de chegar aqui.
+  //
+  // resource_deltas é exclusivamente o log de CONSUMO DE RECURSO — todo
+  // evento aqui tem um jogador/personagem dono. Eventos estruturais da
+  // sessão (presença, cena, combate, etc.) têm uma tabela própria
+  // (session_events) e um endpoint próprio — não passam por aqui.
   const { playerId, actorId, actorName, characterId, resourceType, delta, deltaMeta } = body ?? {};
 
   if (!playerId?.trim() && !actorId?.trim()) {
@@ -169,7 +169,7 @@ function validateEventBody(body, reply) {
   }
   // actorName é obrigatório apenas quando characterId/actorId não estão presentes
   if (!characterId && !actorId && !actorName?.trim()) {
-    reply.code(400).send({ error: 'actorName, characterId ou actorId é obrigatório.' });
+    reply.code(400).send({ error: 'actorName ou characterId é obrigatório.' });
     return false;
   }
   if (!VALID_RESOURCE_TYPES.has(resourceType)) {
@@ -684,6 +684,8 @@ export async function sessionRoutes(fastify) {
     // Resolução única de identidade — mesma função usada por
     // POST /nimrod/session/presence. Regra estrita: actorId só resolve
     // se o personagem já foi sincronizado (foundry_actor_id preenchido).
+    // resource_deltas exige sempre um dono — eventos sem ator/jogador
+    // pertencem a session_events, não aqui.
     const identity = await resolveEventIdentity({ playerId, actorId, characterId, actorName });
     if (!identity) {
       return reply.code(400).send(

@@ -1,7 +1,16 @@
 /**
- * scripts/SessionSync.js  — v3 (handshake architecture)
+ * scripts/SessionSync.js  — v5 (session_events + resource_deltas)
  *
- * Cliente HTTP para o endpoint de sessões do Nimrod.
+ * Cliente HTTP para os dois domínios de evento do Nimrod:
+ *
+ *   sendEvent(payload)        → POST /sessions/:id/events           (resource_deltas)
+ *   sendSessionEvent(payload) → POST /sessions/:id/session-events   (session_events)
+ *
+ * São domínios diferentes no backend (resource_deltas = consumo de recurso,
+ * sempre com dono; session_events = fatos estruturais da sessão — presença,
+ * cena, combate, tokens — dono opcional). Por isso duas rotas, dois corpos
+ * de request diferentes — mas UM único cliente HTTP, compartilhando toda a
+ * lógica de retry/dedup/erro (#send privado). Não são duas APIs paralelas.
  *
  * Autenticação:
  *   Usa X-Nimrod-Key (FOUNDRY_API_KEY configurada em Module Settings).
@@ -9,7 +18,8 @@
  *   preenchida pelo nimrod-bridge após o handshake.
  *
  * API pública:
- *   await SessionSync.sendEvent(payload)
+ *   await SessionSync.sendEvent(payload)         — evento de recurso (HP/ouro/XP/...)
+ *   await SessionSync.sendSessionEvent(payload)   — evento estrutural (presença/cena/combate/...)
  *   await SessionSync.ping()
  *   SessionSync.status()
  *   SessionSync.clearSentCache()
@@ -120,17 +130,45 @@ export class SessionSync {
     return ct.includes('application/json') ? res.json() : { ok: true };
   }
 
-  // ─── API pública ───────────────────────────────────────────────────────────
-
-  static async sendEvent(payload) {
+  /**
+   * Lógica compartilhada entre sendEvent() e sendSessionEvent(): checa
+   * enabled/sessionId, deduplica por eventId, envia, cacheia, loga.
+   * Não decide o formato do body nem a rota — isso é responsabilidade de
+   * cada método público.
+   *
+   * @param {string} path        - path relativo (após baseUrl)
+   * @param {object} body        - corpo já no formato esperado pelo endpoint
+   * @param {string} eventId     - chave de deduplicação
+   * @param {string} logLabel    - texto de sucesso no console
+   * @returns {Promise<object|null>}
+   */
+  static async #send(path, body, eventId, logLabel) {
     if (!this.enabled) return null;
 
-    const sessionId = this.activeSessionId;
-    if (!sessionId) {
-      console.warn('nimrod-session | sendEvent ignorado: sem sessão ativa (handshake pendente).');
+    if (!this.activeSessionId) {
+      console.warn(`nimrod-session | ${logLabel} ignorado: sem sessão ativa (handshake pendente).`);
       return null;
     }
 
+    if (this.#sent.has(eventId)) return null;
+
+    try {
+      const result = await this.#post(path, body);
+      this.#sent.add(eventId);
+      // Cache de deduplicação — evita crescimento indefinido em sessões longas
+      if (this.#sent.size > 5000) this.#sent.clear();
+
+      console.log(`%cnimrod-session | ✓ ${logLabel}`, 'color:#4a9a6a');
+      return result;
+    } catch (err) {
+      console.warn(`nimrod-session | Falha ao enviar (${logLabel}):`, err.message);
+      return null;
+    }
+  }
+
+  // ─── API pública ───────────────────────────────────────────────────────────
+
+  static async sendEvent(payload) {
     if (!payload.actorId) {
       console.warn('nimrod-session | sendEvent ignorado: actorId é obrigatório.', payload);
       return null;
@@ -139,9 +177,6 @@ export class SessionSync {
     const eventId = payload.foundryEventId
       ?? `fvtt-${game.world.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-    if (this.#sent.has(eventId)) return null;
-
-    // sessionId já vai na URL (/sessions/:id/events) — não precisa no body.
     // O módulo não envia playerId. O backend resolve playerId e characterId
     // a partir do actorId (player_characters.foundry_actor_id).
     const body = {
@@ -158,27 +193,59 @@ export class SessionSync {
       source:         'foundry',
     };
 
-    try {
-      const result = await this.#post(
-          `/sessions/${this.activeSessionId}/events`,
-          body
-      );
-      this.#sent.add(eventId);
-      // Cache de deduplicação — evita crescimento indefinido em sessões longas
-      if (this.#sent.size > 5000) this.#sent.clear();
+    const deltaLabel = payload.delta == null
+      ? ''
+      : ` ${payload.delta > 0 ? '+' : ''}${payload.delta}`;
 
-      const deltaLabel = payload.delta == null
-        ? ''
-        : ` ${payload.delta > 0 ? '+' : ''}${payload.delta}`;
-      console.log(
-        `%cnimrod-session | ✓ ${payload.resourceType}${deltaLabel} → ${payload.actorName}`,
-        'color:#4a9a6a',
-      );
-      return result;
-    } catch (err) {
-      console.warn('nimrod-session | Falha ao enviar evento:', err.message);
+    return this.#send(
+      `/sessions/${this.activeSessionId}/events`,
+      body, eventId,
+      `${payload.resourceType}${deltaLabel} → ${payload.actorName}`,
+    );
+  }
+
+  /**
+   * Envia um evento estrutural (session_events) — presença, cena, combate,
+   * tokens, etc. Diferente de sendEvent(): actorId é OPCIONAL aqui (muitos
+   * eventos genuinamente não têm um ator, ex: SCENE_CHANGED).
+   *
+   * @param {object} payload
+   * @param {string}  payload.eventType       - ex: 'PLAYER_CONNECTED', 'SCENE_CHANGED'
+   * @param {string}  [payload.actorId]       - Foundry actor._id, se houver
+   * @param {string}  [payload.actorName]
+   * @param {string}  [payload.foundryName]   - game.user.name — habilita resolução por identidade humana
+   * @param {string}  [payload.characterId]
+   * @param {string}  [payload.playerId]
+   * @param {object}  [payload.payload]       - dados específicos do evento (nunca narrativo)
+   * @param {string}  [payload.foundryEventId]
+   * @param {string}  [payload.occurredAt]
+   */
+  static async sendSessionEvent(payload) {
+    if (!payload.eventType) {
+      console.warn('nimrod-session | sendSessionEvent ignorado: eventType é obrigatório.', payload);
       return null;
     }
+
+    const eventId = payload.foundryEventId
+      ?? `fvtt-${game.world.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    const body = {
+      eventType:      payload.eventType,
+      actorId:        payload.actorId     ?? null,
+      actorName:      payload.actorName   ?? null,
+      foundryName:    payload.foundryName ?? null,
+      characterId:    payload.characterId ?? null,
+      playerId:       payload.playerId    ?? null,
+      payload:        payload.payload     ?? {},
+      foundryEventId: eventId,
+      occurredAt:     payload.occurredAt  ?? new Date().toISOString(),
+    };
+
+    return this.#send(
+      `/sessions/${this.activeSessionId}/session-events`,
+      body, eventId,
+      `${payload.eventType}${payload.actorName ? ` → ${payload.actorName}` : ''}`,
+    );
   }
 
   static async ping() {

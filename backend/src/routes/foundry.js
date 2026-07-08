@@ -5,6 +5,7 @@ import { readFoundryActorsDb, syncFoundryActors, upsertFoundryActors } from '../
 import { resolveEventIdentity } from '../services/actorResolution.js';
 import { isFoundryRequest } from '../lib/foundryAuth.js';
 import { isGM, isGMPrincipal, isAdmin, requireGM, requireGMPrincipal, requireAdmin } from '../lib/roles.js';
+import { getCalendarState, getSeasonKey } from '../services/calendarService.js';
 import { broadcast } from "../ws/broadcast.js";
 
 function resolveFoundryLaunchUrl() {
@@ -39,6 +40,8 @@ function buildFoundryLaunchUrl(baseUrl, token) {
  * PUT  /foundry/mapping           – GM: upsert mapping
  * DELETE /foundry/mapping/:email  – GM: remove mapping
  * GET  /foundry/asset             – proxy Foundry image URLs (no filesystem)
+ * GET  /nimrod/calendar/status    – estação/ano atual, p/ nimrod-bridge trocar clima via FXMaster
+
  */
 
 export async function foundryRoutes(fastify) {
@@ -90,6 +93,33 @@ export async function foundryRoutes(fastify) {
 
   fastify.get('/foundry/actors',                listFoundryActors);
   fastify.get('/foundry/actors/all-characters', listFoundryActors);
+
+
+  // ── GET /nimrod/actor-map ──────────────────────────────────────────────────
+  // Mapeamento direto Foundry actor._id → usuário Nimrod, usado pelo
+  // PlayerMap.autoDiscover() no módulo Foundry (presença/handshake apenas —
+  // eventos de recurso resolvem actorId diretamente em /sessions/:id/events
+  // e não dependem deste endpoint nem do PlayerMap).
+  // Autenticado via X-Nimrod-Key — não requer Cloudflare Access.
+  fastify.get('/nimrod/actor-map', async (req, reply) => {
+    if (!(await isFoundryRequest(req))) return reply.code(401).send({ error: 'Invalid API key.' });
+
+    const res = await query(
+      `SELECT pc.foundry_actor_id AS "actorId",
+              pc.user_id          AS "userId",
+              pc.name             AS "characterName",
+              COALESCE(u.display_name, u.name) AS "displayName"
+       FROM player_characters pc
+       JOIN users u ON u.id = pc.user_id
+       WHERE pc.foundry_actor_id IS NOT NULL
+         AND pc.active = TRUE AND pc.retired = FALSE AND COALESCE(pc.dead, FALSE) = FALSE
+       ORDER BY pc.name ASC`,
+    );
+
+    return res.rows;
+  });
+
+
 
   // ── GET /foundry/launch ────────────────────────────────────────────────────
   fastify.get('/foundry/launch', async (req, reply) => {
@@ -475,6 +505,25 @@ export async function foundryRoutes(fastify) {
     });
 
     return { ok: true, persisted: true, userId, characterId };
+  });
+
+  // ── GET /nimrod/calendar/status ─────────────────────────────────────────────
+  // Consulta a estação/ano atual — usado pelo nimrod-bridge para decidir
+  // quando trocar o clima via FXMaster.
+  // Autenticado via X-Nimrod-Key. Não requer auth Nimrod/CF.
+  fastify.get('/nimrod/calendar/status', async (req, reply) => {
+    if (!(await isFoundryRequest(req))) return reply.code(401).send({ error: 'Invalid API key.' });
+
+    const state = await getCalendarState();
+    return {
+      seasonKey: getSeasonKey(state.season),
+      season: state.season,
+      year: state.year,
+      weekOfSeason: state.weekOfSeason,
+      currentSession: state.currentSession,
+      sessionsUntilNextSeason: state.sessionsUntilNextSeason,
+      nextSeasonKey: getSeasonKey(state.nextSeason),
+    };
   });
 
   // ── GET /nimrod/session/status ─────────────────────────────────────────────

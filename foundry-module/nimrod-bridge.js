@@ -14,11 +14,59 @@
  *   O código é válido durante toda a campanha. Se o Foundry reiniciar,
  *   o mesmo código é reutilizado (lido das world settings).
  *   Só é invalidado quando o narrador encerra a campanha no Nimrod.
+ *
+ * ESCOPO — o que este módulo NÃO faz:
+ *   Presença (conectou/desconectou/reconectou/heartbeat/idle) NÃO é mais
+ *   responsabilidade deste módulo. nimrod-bridge só entrega a sessão
+ *   vinculada (activeSessionId na world setting); nimrod-session/
+ *   PlayerHandlers.js assume a partir daí como única fonte de verdade
+ *   para presença. Isso evita duas implementações independentes
+ *   registrando o mesmo tipo de fato.
  */
 
 const MODULE_ID  = 'nimrod-bridge';
 const POLL_MS    = 5_000;
 const STATUS_CHECK_MS = 30_000;
+
+const CALENDAR_CHECK_MS = 60_000; // estação muda no máximo 1x por sessão — não precisa ser mais frequente que isso
+
+// ─── Clima por estação (FXMaster) ──────────────────────────────────────────────
+//
+// Mapa estação → efeito de clima. Chaves batem com as retornadas por
+// GET /nimrod/calendar/status (WINTER/SPRING/SUMMER/AUTUMN — as mesmas
+// chaves usadas em frontend/src/config/calendarSeasons.js e season_effects
+// no Nimrod).
+//
+// Para trocar o clima de uma estação, edite só este objeto — nenhuma outra
+// parte do código precisa mudar. `particles` segue o formato da Effects API
+// do FXMaster (FXMASTER.api.effects.play): array de { type, options }.
+// Tipos nativos disponíveis: autumnleaves, bats, birds, bubbles, clouds,
+// crows, eagles, embers, fog, hail, rain, rats, snow, snowstorm, spiders,
+// stars (rode `Object.keys(CONFIG.fxmaster.particleEffects)` no console pra
+// ver a lista completa da versão instalada, incluindo FXMaster+ se ativo).
+const SEASON_WEATHER = {
+  WINTER: {
+    particles: [
+      { type: 'snow', options: { density: 0.35, speed: 0.8 } },
+    ],
+  },
+  SPRING: {
+    particles: [
+      { type: 'rain', options: { density: 0.15, speed: 1.0 } },
+    ],
+  },
+  SUMMER: {
+    particles: [
+      { type: 'rain', options: { density: 0, speed: 0 } },
+    ],
+  },
+  AUTUMN: {
+    particles: [
+      { type: 'autumnleaves', options: { density: 0.3, speed: 0.7 } },
+    ],
+  },
+};
+
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 
@@ -39,6 +87,12 @@ Hooks.once('init', () => {
   game.settings.register(MODULE_ID, 'activeSessionId', {
     name: 'Sessão Ativa (auto)', scope: 'world', config: false, type: String, default: '',
   });
+    game.settings.register(MODULE_ID, 'autoWeather', {
+    name: 'Trocar clima automaticamente por estação',
+    hint: 'Usa o FXMaster para aplicar o clima da estação atual do Nimrod quando ela mudar. Requer o módulo FXMaster ativo.',
+    scope: 'world', config: true, type: Boolean, default: true,
+  });
+
 });
 
 // ─── Estado ───────────────────────────────────────────────────────────────────
@@ -50,6 +104,10 @@ const State = {
   pollTimer:   null,
   watchTimer:  null,
   panel:       null,
+  calendarTimer:   null,
+  lastSeasonKey:   null,
+  weatherEffectIds: null, // { particles: [...], filters: [...] } — retornado pelo FXMaster ao aplicar
+
 };
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
@@ -269,9 +327,10 @@ async function onLinked(sessionId) {
 
   renderPanel();
   ui.notifications?.info(`[${MODULE_ID}] Sessão Nimrod vinculada!`);
-  await syncPresence(sessionId);
-  registerPresenceHooks(sessionId);
+  //await syncPresence(sessionId);
+  //registerPresenceHooks(sessionId);
   startSessionWatcher(sessionId);
+  startCalendarWatcher();
 }
 
 // ─── Presença ────────────────────────────────────────────────────────────────
@@ -316,6 +375,116 @@ function registerPresenceHooks(sessionId) {
   }, { once: true });
 }
 
+// ─── Clima por estação ──────────────────────────────────────────────────────
+
+/**
+ * Troca o clima da cena atual pro clima configurado da estação, via FXMaster.
+ * Só GM aplica (efeitos de cena exigem permissão de GM no FXMaster de qualquer
+ * forma). Se o FXMaster não estiver ativo, ou se a troca automática estiver
+ * desligada nas configurações do módulo, não faz nada.
+ */
+async function applySeasonWeather(seasonKey) {
+  if (!game.user.isGM) return;
+  if (!game.settings.get(MODULE_ID, 'autoWeather')) return;
+
+  if (typeof FXMASTER === 'undefined' || !FXMASTER?.api?.effects) {
+    console.warn(`[${MODULE_ID}] FXMaster não encontrado.`);
+    return;
+  }
+
+  const weather = SEASON_WEATHER[seasonKey];
+  if (!weather) {
+    console.warn(`[${MODULE_ID}] Nenhum clima configurado para a estação "${seasonKey}".`);
+    return;
+  }
+
+  try {
+    // Remove todos os efeitos registrados na cena
+    const effects = canvas.scene.getFlag("fxmaster", "effects") ?? {};
+    const filters = canvas.scene.getFlag("fxmaster", "filters") ?? {};
+
+    const particleIds = Object.keys(effects);
+    const filterIds = Object.keys(filters);
+
+    if (particleIds.length || filterIds.length) {
+      await FXMASTER.api.effects.stop({
+        particles: particleIds,
+        filters: filterIds,
+        skipFading: true,
+      });
+    }
+
+    // Aplica o clima da estação
+    State.weatherEffectIds = await FXMASTER.api.effects.play({
+      particles: weather.particles ?? [],
+      filters: weather.filters ?? [],
+    });
+
+    console.info(
+      `%c[${MODULE_ID}] Clima atualizado: ${seasonKey}`,
+      "color:#4a9a6a;font-weight:bold"
+    );
+  } catch (err) {
+    console.warn(`[${MODULE_ID}] Falha ao aplicar clima (${seasonKey}):`, err);
+  }
+}
+
+async function clearAllWeather() {
+  if (typeof FXMASTER === 'undefined' || !canvas?.scene) return;
+
+  const effects = canvas.scene.getFlag("fxmaster", "effects") ?? {};
+  const filters = canvas.scene.getFlag("fxmaster", "filters") ?? {};
+
+  const particleIds = Object.keys(effects);
+  const filterIds = Object.keys(filters);
+
+  if (!particleIds.length && !filterIds.length) return;
+
+  await FXMASTER.api.effects.stop({
+    particles: particleIds,
+    filters: filterIds,
+    skipFading: true,
+  });
+
+  State.weatherEffectIds = null;
+}
+
+/**
+ * Consulta a estação atual no Nimrod. Se mudou desde a última checagem,
+ * aplica o clima novo. Na primeira checagem após vincular a sessão, também
+ * aplica (garante que o clima já entre correto ao abrir o mundo).
+ */
+async function pollCalendar() {
+  if (!State.linked) return;
+  try {
+    const data = await nGet('/nimrod/calendar/status');
+    if (!data.seasonKey || data.seasonKey === State.lastSeasonKey) return;
+
+    const changed = State.lastSeasonKey !== null;
+    State.lastSeasonKey = data.seasonKey;
+    await applySeasonWeather(data.seasonKey);
+
+    if (changed && game.user.isGM) {
+      ui.notifications?.info(`[${MODULE_ID}] Estação mudou para ${data.season} — clima atualizado.`);
+    }
+  } catch (err) {
+    console.warn(`[${MODULE_ID}] Falha ao consultar calendário:`, err.message);
+  }
+}
+
+function startCalendarWatcher() {
+  if (State.calendarTimer) clearInterval(State.calendarTimer);
+  pollCalendar(); // aplica de imediato, não espera o primeiro intervalo
+  State.calendarTimer = setInterval(pollCalendar, CALENDAR_CHECK_MS);
+}
+
+function stopCalendarWatcher() {
+  if (State.calendarTimer) { clearInterval(State.calendarTimer); State.calendarTimer = null; }
+  State.lastSeasonKey = null;
+}
+
+
+
 // ─── Watcher de encerramento ─────────────────────────────────────────────────
 
 function startSessionWatcher(sessionId) {
@@ -335,6 +504,8 @@ function startSessionWatcher(sessionId) {
 function onSessionClosed(sessionId) {
   console.info(`%c[${MODULE_ID}] Sessão encerrada pelo Nimrod.`, 'color:#c04040');
   State.linked = false; State.sessionId = null;
+  stopCalendarWatcher();
+
   // Limpa código salvo — campanha encerrada
   game.settings.set(MODULE_ID, 'handshakeCode', '').catch(() => {});
   game.settings.set(MODULE_ID, 'activeSessionId', '').catch(() => {});
@@ -377,9 +548,10 @@ Hooks.once('ready', async () => {
         State.code      = savedCode || null;
         console.info(`%c[${MODULE_ID}] Sessão ativa restaurada: ${savedSession}`, 'color:#4a9a6a');
         renderPanel();
-        await syncPresence(savedSession);
-        registerPresenceHooks(savedSession);
+//        await syncPresence(savedSession);
+//        registerPresenceHooks(savedSession);
         startSessionWatcher(savedSession);
+        startCalendarWatcher();
         return;
       }
       console.info(`[${MODULE_ID}] Sessão salva (${savedSession}) não está mais aberta (status: ${data.status}) — limpando e reiniciando handshake.`);

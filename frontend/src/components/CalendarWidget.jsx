@@ -17,6 +17,7 @@ import { api } from '../lib/api.js';
 import { useWs } from '../contexts/WsContext.jsx';
 import { ChevronRight } from 'lucide-react';
 import { getSeasonConfig, getSeasonImage } from '../config/calendarSeasons.js';
+import { getEffectIcon, getEffectBadge } from '../config/seasonEffectDisplay.js';
 
 export function CalendarWidget() {
   const { on } = useWs();
@@ -33,6 +34,11 @@ export function CalendarWidget() {
     return unsub;
   }, [on]);
 
+  useEffect(() => {
+    const unsub = on('SEASON_EFFECTS_UPDATED', () => load());
+    return unsub;
+  }, [on, load]);
+
   if (!state) return null;
 
   const season      = getSeasonConfig(state.season);
@@ -40,12 +46,6 @@ export function CalendarWidget() {
   const sceneImage  = getSeasonImage(state.season, state.weekOfSeason);
   const SeasonIcon  = season.icon;
   const NextIcon    = nextSeason.icon;
-
-  console.log({
-    season: state.season,
-    sceneImage,
-    seasonConfig: season,
-  });
 
   return (
     <Link to="/calendar" className="cw-panel">
@@ -88,12 +88,17 @@ export function CalendarWidget() {
         <div className="cw-effects">
           <span className="cw-effects-label">Efeitos da estação</span>
           <div className="cw-effects-list">
-            {season.effects.map(({ icon: Icon, text }, i) => (
-              <div key={i} className="cw-effect-row">
-                <Icon size={12} style={{ color: season.accentColor, flexShrink: 0 }} />
-                <span>{text}</span>
-              </div>
-            ))}
+            {(state.effects || []).map((effect) => {
+              const Icon = getEffectIcon(effect);
+              const badge = getEffectBadge(effect);
+              return (
+                <div key={effect.id} className="cw-effect-row">
+                  <Icon size={12} style={{ color: season.accentColor, flexShrink: 0 }} />
+                  <span>{effect.label}</span>
+                  {badge && <span className="cw-effect-badge" style={{ color: season.accentColor }}>{badge}</span>}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -191,6 +196,10 @@ export function CalendarWidget() {
         .cw-effect-row {
           display: flex; align-items: center; gap: 7px;
           font-size: 11.5px; color: var(--text-muted); line-height: 1.3;
+        }
+        .cw-effect-badge {
+          margin-left: auto; font-family: var(--font-mono); font-size: 10.5px;
+          font-weight: 700; flex-shrink: 0;
         }
 
         .cw-next {

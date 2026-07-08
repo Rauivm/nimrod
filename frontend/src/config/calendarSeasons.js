@@ -2,7 +2,13 @@
  * src/config/calendarSeasons.js
  *
  * Fonte única de verdade para tudo que é VISUAL/apresentacional sobre as
- * estações no frontend (cores, imagens, ícone, efeitos de lore).
+ * estações no frontend (cores, imagens, ícone, tagline).
+ *
+ * Os EFEITOS mecânicos de cada estação (perícia+vantagem/desvantagem, preço,
+ * texto de lore) NÃO ficam aqui — são balanceamento de jogo, customizável
+ * pelo GM, e vêm do backend (`season_effects`, via `GET /world/calendar` ou
+ * `GET /world/calendar/effects/:seasonKey`). Ver `seasonEffectDisplay.js`
+ * para como desenhar esses efeitos.
  *
  * A ordem cronológica e o cálculo de ano/semana/sessão continuam vindo do
  * backend (CalendarService) — este arquivo não decide "que estação é agora",
@@ -15,16 +21,12 @@
  * `public/images/seasons/` ou o caminho abaixo — nenhum componente React
  * precisa ser tocado.
  *
- * Para o futuro (clima, FXMaster, modificadores de regra): adicione campos
- * novos aqui dentro do objeto da estação (ex: `weatherProfile`,
- * `foundryPlaylist`, `ruleModifiers`) — o componente continua só consumindo.
+ * Para o futuro (clima, FXMaster): adicione campos novos aqui dentro do
+ * objeto da estação (ex: `weatherProfile`, `foundryPlaylist`) — o componente
+ * continua só consumindo.
  */
 
-import {
-  Snowflake, Flower2, Sun, Leaf,
-  Footprints, ShieldAlert, Coins, Home,
-  Bug, PartyPopper, CloudRain, Heart, Wheat,
-} from 'lucide-react';
+import { Snowflake, Flower2, Sun, Leaf } from 'lucide-react';
 
 // ── Quantas semanas de estação usam a arte "early" antes de trocar pra "late" ──
 // Estação tem 12 semanas (regra do CalendarService). 1–6 → early, 7–12 → late.
@@ -45,12 +47,6 @@ export const SEASONS = {
       early: '/images/seasons/winter-early.png',
       late: '/images/seasons/winter-late.png',
     },
-    effects: [
-      { icon: Footprints, text: 'Aumento da dificuldade de rastreio' },
-      { icon: ShieldAlert, text: 'Aumento da dificuldade de sobrevivência' },
-      { icon: Coins, text: 'Alimentos mais caros' },
-      { icon: Home, text: 'Estadia mais cara' },
-    ],
   },
 
   SPRING: {
@@ -66,11 +62,6 @@ export const SEASONS = {
       early: '/images/seasons/spring-early.png',
       late: '/images/seasons/spring-late.png',
     },
-    effects: [
-      { icon: Bug, text: 'Aumento no número de bestas e doenças' },
-      { icon: Coins, text: 'Redução no custo de alimentos' },
-      { icon: PartyPopper, text: 'Início do ano — festas de colheita' },
-    ],
   },
 
   SUMMER: {
@@ -86,11 +77,6 @@ export const SEASONS = {
       early: '/images/seasons/summer-early.png',
       late: '/images/seasons/summer-late.png',
     },
-    effects: [
-      { icon: CloudRain, text: 'Calor intenso e chuvas fortes' },
-      { icon: Footprints, text: 'Facilidade de rastreio' },
-      { icon: Heart, text: 'Época de reprodução das bestas' },
-    ],
   },
 
   AUTUMN: {
@@ -106,11 +92,6 @@ export const SEASONS = {
       early: '/images/seasons/autumn-early.png',
       late: '/images/seasons/autumn-late.png',
     },
-    effects: [
-      { icon: Wheat, text: 'Escassez de alimentos' },
-      { icon: Footprints, text: 'Dificuldade moderada de rastreio' },
-      { icon: ShieldAlert, text: 'Dificuldade moderada de sobrevivência' },
-    ],
   },
 };
 

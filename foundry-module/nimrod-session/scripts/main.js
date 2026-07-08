@@ -41,6 +41,7 @@ import { SessionSync }      from './SessionSync.js';
 import { EventDetector }    from './EventDetector.js';
 import { PlayerMap }        from './PlayerMap.js';
 import { RESOURCE_HANDLERS } from './ResourceHandlers.js';
+import { PlayerHandlers }    from './PlayerHandlers.js';
 
 const MODULE_ID = 'nimrod-session';
 
@@ -49,6 +50,8 @@ const MODULE_ID = 'nimrod-session';
 // ═══════════════════════════════════════════════════════════════════════════
 
 Hooks.once('init', () => {
+
+  PlayerHandlers.registerSettings();
 
   game.settings.register(MODULE_ID, 'syncEnabled', {
     name: 'NS.Settings.SyncEnabled', hint: 'NS.Settings.SyncEnabledHint',
@@ -83,6 +86,11 @@ Hooks.once('init', () => {
       console.log(`%cnimrod-session | Sessão ativa → ${val || '(nenhuma)'}`, 'color:#c9a84c');
       // Se acabou de receber um sessionId e os hooks ainda não foram registrados, registra
       if (val && !_hooksRegistered) _registerHooks();
+      // Presença tem ciclo de vida próprio (timers de heartbeat/idle) —
+      // liga ao entrar em sessão, desliga ao sair, independente do gate
+      // "uma vez para sempre" usado pelos hooks de recurso/item.
+      if (val) PlayerHandlers.register();
+      else     PlayerHandlers.unregister();
     },
   });
 
@@ -299,6 +307,7 @@ Hooks.once('ready', () => {
   // Se o sessionId já está disponível (reload com sessão em andamento), registra imediatamente
   if (SessionSync.activeSessionId) {
     _registerHooks();
+    PlayerHandlers.register();
   } else {
     console.log('nimrod-session | Aguardando handshake para registrar hooks…');
   }
@@ -315,6 +324,7 @@ function _exposeApi() {
     sync:     SessionSync,
     players:  PlayerMap, // diagnóstico via console apenas — não usado por hooks
     detector: EventDetector,
+    presence: PlayerHandlers,
 
     /**
      * Envia um evento manualmente via console do Foundry.

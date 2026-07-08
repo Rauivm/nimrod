@@ -4,15 +4,18 @@
  * Módulo: Calendário do Mundo (MVP - Etapa 1)
  *
  * Rotas:
- *  GET  /world/calendar          — estado atual (todos os usuários autenticados)
+ *  GET  /world/calendar          — estado atual + efeitos da estação corrente
  *  GET  /world/calendar/history  — trilha de auditoria (GM only)
  *  POST /world/calendar/next     — avança 1 sessão (GM only)
  *  POST /world/calendar/previous — volta 1 sessão (GM only)
  *  POST /world/calendar/session  — define a sessão manualmente (GM only)
  *
- * Fora de escopo nesta etapa (ver spec): integração Foundry, efeitos de
- * estação, clima, economia, eventos sazonais, feriados, fases da lua,
- * calendário por campanha, data oficial do mundo por sessão.
+ * Efeitos mecânicos de estação (CRUD) ficam em routes/seasonEffects.js.
+ *
+ * Fora de escopo nesta etapa (ver spec): integração Foundry, clima,
+ * economia automática, eventos sazonais, feriados, calendário por campanha.
+ * "Data oficial do mundo por sessão" (dia da Lua) está modelado mas aguarda
+ * definição dos nomes das Luas.
  */
 
 import { requireGM } from '../lib/roles.js';
@@ -23,8 +26,15 @@ import {
   advanceSession,
   rewindSession,
   setSession,
+  getSeasonKey,
   CalendarError,
 } from '../services/calendarService.js';
+import { listEffectsBySeason } from '../services/seasonEffectsService.js';
+
+async function withCurrentEffects(state) {
+  const effects = await listEffectsBySeason(getSeasonKey(state.season));
+  return { ...state, effects };
+}
 
 function handleCalendarError(err, reply) {
   if (err instanceof CalendarError) {
@@ -39,7 +49,7 @@ export async function calendarRoutes(fastify) {
   fastify.get('/world/calendar', async (req, reply) => {
     try {
       const state = await getCalendarState();
-      return state;
+      return await withCurrentEffects(state);
     } catch (err) {
       return handleCalendarError(err, reply);
     }
@@ -57,7 +67,7 @@ export async function calendarRoutes(fastify) {
   fastify.post('/world/calendar/next', async (req, reply) => {
     if (!requireGM(req, reply)) return;
     try {
-      const state = await advanceSession(req.user.id);
+      const state = await withCurrentEffects(await advanceSession(req.user.id));
       broadcast('CALENDAR_UPDATED', state);
       return state;
     } catch (err) {
@@ -69,7 +79,7 @@ export async function calendarRoutes(fastify) {
   fastify.post('/world/calendar/previous', async (req, reply) => {
     if (!requireGM(req, reply)) return;
     try {
-      const state = await rewindSession(req.user.id);
+      const state = await withCurrentEffects(await rewindSession(req.user.id));
       broadcast('CALENDAR_UPDATED', state);
       return state;
     } catch (err) {
@@ -91,7 +101,7 @@ export async function calendarRoutes(fastify) {
   }, async (req, reply) => {
     if (!requireGM(req, reply)) return;
     try {
-      const state = await setSession(req.body.session, req.user.id);
+      const state = await withCurrentEffects(await setSession(req.body.session, req.user.id));
       broadcast('CALENDAR_UPDATED', state);
       return state;
     } catch (err) {
