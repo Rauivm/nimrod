@@ -53,6 +53,16 @@ export function serializeActor(actor) {
   // Flags de estado (definidas via actor.update no Foundry ou via GM)
   const flags = actor.flags?.['nimrod-sync'] ?? {};
 
+  const abilities = sys.abilities ?? {};
+  const attrs = {
+    str: Number(abilities.str?.value ?? abilities.str?.total ?? 10),
+    dex: Number(abilities.dex?.value ?? abilities.dex?.total ?? 10),
+    con: Number(abilities.con?.value ?? abilities.con?.total ?? 10),
+    int: Number(abilities.int?.value ?? abilities.int?.total ?? 10),
+    wis: Number(abilities.wis?.value ?? abilities.wis?.total ?? 10),
+    cha: Number(abilities.cha?.value ?? abilities.cha?.total ?? 10),
+  };
+
   return {
     id:         actor.id,
     name:       actor.name,
@@ -66,6 +76,7 @@ export function serializeActor(actor) {
     biography:  details.biography?.value ?? null,
     isDead:     Boolean(flags.isDead    ?? false),
     isRetired:  Boolean(flags.isRetired ?? false),
+    abilities:  attrs,
     modifiedAt: Date.now(),   // sempre um número válido — nunca null/undefined
   };
 }

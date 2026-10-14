@@ -24,6 +24,40 @@
 
 import { query } from '../db/index.js';
 
+async function withIdentitySnapshot(identity) {
+  if (!identity?.playerId) return identity;
+
+  const userRes = await query(
+    `SELECT id, name, display_name, role
+     FROM users
+     WHERE id = $1
+     LIMIT 1`,
+    [identity.playerId],
+  );
+
+  const user = userRes.rows[0] ?? {};
+  let characterName = identity.actorName ?? null;
+
+  if (identity.characterId) {
+    const charRes = await query(
+      `SELECT id, name
+       FROM player_characters
+       WHERE id = $1
+       LIMIT 1`,
+      [identity.characterId],
+    );
+    characterName = charRes.rows[0]?.name ?? characterName;
+  }
+
+  return {
+    ...identity,
+    userName:      user.name ?? null,
+    displayName:   user.display_name ?? null,
+    userRole:      user.role ?? null,
+    characterName,
+  };
+}
+
 /**
  * Resolve um Foundry actor._id para o usuário e personagem Nimrod
  * correspondentes.
@@ -102,11 +136,11 @@ export async function resolveEventIdentity({ playerId, actorId, characterId, act
   if (!resolvedPlayerId && actorId) {
     const ownership = await resolveActorOwnership(actorId);
     if (ownership) {
-      return {
+      return withIdentitySnapshot({
         playerId:    ownership.userId,
         characterId: resolvedCharacterId ?? ownership.characterId,
         actorName:   resolvedActorName   ?? ownership.actorName,
-      };
+      });
     }
     // actorId não sincronizado — cai para o tier 5 (foundryName) antes de
     // desistir, em vez de retornar null imediatamente.
@@ -128,7 +162,11 @@ export async function resolveEventIdentity({ playerId, actorId, characterId, act
         [lookupName],
       );
       if (fmRes.rows.length) {
-        return { playerId: fmRes.rows[0].user_id, characterId: resolvedCharacterId, actorName: resolvedActorName ?? foundryName };
+        return withIdentitySnapshot({
+          playerId: fmRes.rows[0].user_id,
+          characterId: resolvedCharacterId,
+          actorName: resolvedActorName ?? foundryName,
+        });
       }
 
       const uRes = await query(
@@ -138,7 +176,11 @@ export async function resolveEventIdentity({ playerId, actorId, characterId, act
         [foundryName],
       );
       if (uRes.rows.length) {
-        return { playerId: uRes.rows[0].id, characterId: resolvedCharacterId, actorName: resolvedActorName ?? foundryName };
+        return withIdentitySnapshot({
+          playerId: uRes.rows[0].id,
+          characterId: resolvedCharacterId,
+          actorName: resolvedActorName ?? foundryName,
+        });
       }
     }
     return null;
@@ -159,7 +201,7 @@ export async function resolveEventIdentity({ playerId, actorId, characterId, act
     if (!ch.active || ch.retired || ch.dead) return null;
 
     resolvedActorName = ch.name;
-    return { playerId: resolvedPlayerId, characterId: resolvedCharacterId, actorName: resolvedActorName };
+    return withIdentitySnapshot({ playerId: resolvedPlayerId, characterId: resolvedCharacterId, actorName: resolvedActorName });
   }
 
   // 4. Fallback: playerId + actorName por nome (sem characterId conhecido)
@@ -175,7 +217,7 @@ export async function resolveEventIdentity({ playerId, actorId, characterId, act
       [resolvedPlayerId, resolvedActorName],
     );
     resolvedCharacterId = byName.rows[0]?.id ?? null;
-    return { playerId: resolvedPlayerId, characterId: resolvedCharacterId, actorName: resolvedActorName };
+    return withIdentitySnapshot({ playerId: resolvedPlayerId, characterId: resolvedCharacterId, actorName: resolvedActorName });
   }
 
   return null; // playerId presente mas sem forma de determinar actorName

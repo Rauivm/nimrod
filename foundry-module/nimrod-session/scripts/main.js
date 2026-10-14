@@ -42,6 +42,8 @@ import { EventDetector }    from './EventDetector.js';
 import { PlayerMap }        from './PlayerMap.js';
 import { RESOURCE_HANDLERS } from './ResourceHandlers.js';
 import { PlayerHandlers }    from './PlayerHandlers.js';
+import { SceneHandlers }     from './SceneHandlers.js';
+import { EventType }         from './EventTypes.js';
 
 const MODULE_ID = 'nimrod-session';
 
@@ -135,6 +137,8 @@ function _registerHooks() {
   // Adicionar um novo recurso rastreável não exige tocar este bloco —
   // apenas registrar uma nova entrada em ResourceHandlers.js.
   const preUpdateCache = new Map();
+  const preActorStateCache = new Map();
+  const preItemUpdateCache = new Map();
 
   Hooks.on('preUpdateActor', (actor, changes, options, userId) => {
     if (userId !== game.user.id) return; // só quem originou a mudança guarda snapshot
@@ -145,6 +149,20 @@ function _registerHooks() {
     for (const [key, handler] of Object.entries(RESOURCE_HANDLERS)) {
       if (foundry.utils.getProperty(sys, handler.path) !== undefined) {
         snapshot[key] = handler.snapshot(actor);
+      }
+    }
+
+    if (
+      foundry.utils.getProperty(sys, 'attributes.hp') !== undefined ||
+      foundry.utils.getProperty(sys, 'attributes.death') !== undefined
+    ) {
+      preActorStateCache.set(actor.id, {
+        hp: Number(actor.system?.attributes?.hp?.value ?? 0),
+        deathSuccess: Number(actor.system?.attributes?.death?.success ?? actor.system?.attributes?.death?.successes ?? 0),
+        deathFailure: Number(actor.system?.attributes?.death?.failure ?? actor.system?.attributes?.death?.failures ?? 0),
+      });
+      if (preActorStateCache.size > 100) {
+        preActorStateCache.delete(preActorStateCache.keys().next().value);
       }
     }
 
@@ -190,6 +208,115 @@ function _registerHooks() {
         foundryEventId: `${game.world.id}-${actor.id}-${ev.resourceType}-${Date.now()}`,
       });
     }
+
+    const preState = preActorStateCache.get(actor.id);
+    preActorStateCache.delete(actor.id);
+
+    if (preState) {
+      const afterHp = Number(actor.system?.attributes?.hp?.value ?? 0);
+      const afterDeathSuccess = Number(actor.system?.attributes?.death?.success ?? actor.system?.attributes?.death?.successes ?? 0);
+      const afterDeathFailure = Number(actor.system?.attributes?.death?.failure ?? actor.system?.attributes?.death?.failures ?? 0);
+      const statePayload = {
+        hp_before: preState.hp,
+        hp_after: afterHp,
+        death_success_before: preState.deathSuccess,
+        death_success_after: afterDeathSuccess,
+        death_failure_before: preState.deathFailure,
+        death_failure_after: afterDeathFailure,
+      };
+
+      const structuralEvents = [];
+      if (preState.hp > 0 && afterHp <= 0) {
+        structuralEvents.push(EventType.UNCONSCIOUS);
+      }
+      if (preState.hp <= 0 && afterHp > 0) {
+        structuralEvents.push(EventType.REVIVED);
+      }
+      if (afterDeathSuccess > preState.deathSuccess) {
+        structuralEvents.push(EventType.DEATH_SAVE_SUCCESS);
+      }
+      if (afterDeathFailure > preState.deathFailure) {
+        structuralEvents.push(EventType.DEATH_SAVE_FAILURE);
+      }
+      if (preState.deathFailure < 3 && afterDeathFailure >= 3) {
+        structuralEvents.push(EventType.DEAD);
+      }
+
+      for (const eventType of structuralEvents) {
+        await SessionSync.sendSessionEvent({
+          eventType,
+          actorId: actor.id,
+          actorName: actor.name,
+          payload: statePayload,
+          foundryEventId: `${game.world.id}-${actor.id}-${eventType}-${Date.now()}`,
+        });
+      }
+    }
+  });
+
+  Hooks.on('preUpdateItem', (item, changes, options, userId) => {
+    if (userId !== game.user.id) return;
+    if (!game.settings.get(MODULE_ID, 'trackItems')) return;
+
+    const sys = changes?.system ?? {};
+    const touched =
+      foundry.utils.getProperty(sys, 'quantity') !== undefined ||
+      foundry.utils.getProperty(sys, 'uses.value') !== undefined ||
+      foundry.utils.getProperty(sys, 'equipped') !== undefined ||
+      foundry.utils.getProperty(sys, 'attuned') !== undefined;
+    if (!touched) return;
+
+    const actor = item.parent;
+    if (!(actor instanceof Actor) || !actor.id) return;
+
+    const onlyOwned = game.settings.get(MODULE_ID, 'onlyPlayerOwned');
+    if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== 'character')) return;
+    if (!SessionSync.activeSessionId) return;
+
+    const snapshot = EventDetector.snapshotItem(item);
+    if (!snapshot) return;
+
+    preItemUpdateCache.set(item.uuid ?? item.id, snapshot);
+    if (preItemUpdateCache.size > 100) {
+      preItemUpdateCache.delete(preItemUpdateCache.keys().next().value);
+    }
+  });
+
+  Hooks.on('updateItem', async (item, changes, options, userId) => {
+    if (userId !== game.user.id) return;
+    if (!game.settings.get(MODULE_ID, 'trackItems')) return;
+
+    const actor = item.parent;
+    if (!(actor instanceof Actor) || !actor.id) return;
+
+    const onlyOwned = game.settings.get(MODULE_ID, 'onlyPlayerOwned');
+    if (onlyOwned && (!actor.hasPlayerOwner || actor.type !== 'character')) return;
+    if (!SessionSync.activeSessionId) return;
+
+    const cacheKey = item.uuid ?? item.id;
+    const pre = preItemUpdateCache.get(cacheKey);
+    preItemUpdateCache.delete(cacheKey);
+
+    const { resourceEvents, sessionEvents } = EventDetector.fromItemUpdate(actor, item, pre);
+
+    for (const ev of resourceEvents) {
+      if (ev.delta === 0) continue;
+      await SessionSync.sendEvent({
+        actorId: actor.id,
+        actorName: actor.name,
+        ...ev,
+        foundryEventId: `${game.world.id}-updateItem-${item.id}-${ev.deltaMeta?.change_type ?? 'change'}-${Date.now()}`,
+      });
+    }
+
+    for (const ev of sessionEvents) {
+      await SessionSync.sendSessionEvent({
+        actorId: actor.id,
+        actorName: actor.name,
+        ...ev,
+        foundryEventId: `${game.world.id}-updateItem-${item.id}-${ev.eventType}-${Date.now()}`,
+      });
+    }
   });
 
   console.log("register createItem");
@@ -232,10 +359,71 @@ function _registerHooks() {
     });
   });
 
+  async function sendCombatEvent(combat, eventType, { combatant = null, changes = null } = {}) {
+    if (!SessionSync.activeSessionId) return;
+
+    const actor = combatant?.actor ?? null;
+    await SessionSync.sendSessionEvent({
+      eventType,
+      actorId: actor?.id ?? null,
+      actorName: actor?.name ?? combatant?.name ?? null,
+      payload: {
+        combat_id: combat?.id ?? combatant?.parent?.id ?? null,
+        scene_id: combat?.scene?.id ?? canvas?.scene?.id ?? null,
+        round: combat?.round ?? null,
+        turn: combat?.turn ?? null,
+        combatant_id: combatant?.id ?? null,
+        token_id: combatant?.tokenId ?? combatant?.token?.id ?? null,
+        defeated: combatant?.defeated ?? null,
+        actor_type: actor?.type ?? null,
+        has_player_owner: actor?.hasPlayerOwner ?? false,
+        changes: changes ?? null,
+      },
+      foundryEventId: `${game.world.id}-${eventType}-${combat?.id ?? combatant?.parent?.id ?? 'combat'}-${combatant?.id ?? 'table'}-${Date.now()}`,
+    });
+  }
+
+  Hooks.on('createCombat', async (combat, options, userId) => {
+    if (userId !== game.user.id) return;
+    await sendCombatEvent(combat, EventType.COMBAT_STARTED);
+  });
+
+  Hooks.on('updateCombat', async (combat, changes, options, userId) => {
+    if (userId !== game.user.id) return;
+    if (changes?.round !== undefined) {
+      await sendCombatEvent(combat, EventType.COMBAT_ROUND_CHANGED, { changes: { round: changes.round } });
+    }
+    if (changes?.turn !== undefined) {
+      await sendCombatEvent(combat, EventType.COMBAT_TURN_CHANGED, { changes: { turn: changes.turn } });
+    }
+  });
+
+  Hooks.on('createCombatant', async (combatant, options, userId) => {
+    if (userId !== game.user.id) return;
+    await sendCombatEvent(combatant.parent, EventType.COMBAT_ENTERED, { combatant });
+  });
+
+  Hooks.on('deleteCombatant', async (combatant, options, userId) => {
+    if (userId !== game.user.id) return;
+    await sendCombatEvent(combatant.parent, EventType.COMBAT_EXITED, { combatant });
+  });
+
+  Hooks.on('updateCombatant', async (combatant, changes, options, userId) => {
+    if (userId !== game.user.id) return;
+    if (changes?.defeated !== true) return;
+    await sendCombatEvent(combatant.parent, EventType.COMBAT_DEFEATED, {
+      combatant,
+      changes: { defeated: true },
+    });
+  });
+
   Hooks.on('deleteCombat', async (combat, options, userId) => {
     if (userId !== game.user.id) return; // só quem originou o encerramento envia
+    if (!SessionSync.activeSessionId) return;
+
+    await sendCombatEvent(combat, EventType.COMBAT_ENDED);
+
     if (!game.settings.get(MODULE_ID, 'trackHp'))  return;
-    if (!SessionSync.activeSessionId)               return;
     for (const combatant of (combat.combatants?.contents ?? [])) {
       const actor = combatant.actor;
       if (!actor?.id || actor.type !== 'character' || !actor.hasPlayerOwner) continue;
@@ -255,6 +443,9 @@ function _registerHooks() {
       });
     }
   });
+
+  // Cena/mapa/tokens — ver SceneHandlers.js para o que é e não é rastreado
+  SceneHandlers.register();
 
   // Botões na barra de cena
   Hooks.on('getSceneControlButtons', (controls) => {
@@ -325,6 +516,7 @@ function _exposeApi() {
     players:  PlayerMap, // diagnóstico via console apenas — não usado por hooks
     detector: EventDetector,
     presence: PlayerHandlers,
+    scene:    SceneHandlers,
 
     /**
      * Envia um evento manualmente via console do Foundry.

@@ -73,6 +73,12 @@ const PLAYER_HANDLERS_EVENT_TYPES = Object.freeze({
 
 const ATTENDANCE_PROJECTED_TYPES = new Set(Object.values(PLAYER_HANDLERS_EVENT_TYPES));
 
+function compactObject(obj) {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => value !== undefined && value !== null && value !== ''),
+  );
+}
+
 /**
  * Aplica o efeito de um evento de presença recém-gravado sobre
  * session_attendance. Chamada DEPOIS que o INSERT em session_events já
@@ -181,13 +187,20 @@ export async function sessionEventRoutes(fastify) {
     let resolvedCharacterId = characterId ?? null;
     let resolvedPlayerId    = playerId    ?? null;
     let resolvedActorName   = actorName   ?? null;
+    let resolvedIdentity    = null;
 
-    if (!resolvedPlayerId && actorId) {
-      const identity = await resolveEventIdentity({ actorId, actorName });
-      if (identity) {
-        resolvedPlayerId    = identity.playerId;
-        resolvedCharacterId = resolvedCharacterId ?? identity.characterId;
-        resolvedActorName   = resolvedActorName   ?? identity.actorName;
+    if (actorId || foundryName || resolvedPlayerId || resolvedCharacterId) {
+      resolvedIdentity = await resolveEventIdentity({
+        playerId: resolvedPlayerId,
+        actorId,
+        characterId: resolvedCharacterId,
+        actorName,
+        foundryName,
+      });
+      if (resolvedIdentity) {
+        resolvedPlayerId    = resolvedIdentity.playerId;
+        resolvedCharacterId = resolvedCharacterId ?? resolvedIdentity.characterId;
+        resolvedActorName   = resolvedActorName   ?? resolvedIdentity.actorName;
       }
       // identity === null (ex: NPC, personagem não sincronizado) → segue
       // sem interromper; actor_id bruto é preservado abaixo de qualquer forma.
@@ -199,6 +212,25 @@ export async function sessionEventRoutes(fastify) {
     if (resolvedCharacterId && !isValidUuid(resolvedCharacterId)) {
       return reply.code(400).send({ error: `characterId inválido: "${resolvedCharacterId}".` });
     }
+
+    const basePayload = payload ?? {};
+    const enrichedPayload = eventType.trim() === PLAYER_HANDLERS_EVENT_TYPES.HEARTBEAT
+      ? {
+          ...basePayload,
+          ...compactObject({
+            user_id:           resolvedIdentity?.playerId ?? resolvedPlayerId,
+            user_name:         resolvedIdentity?.userName,
+            display_name:      resolvedIdentity?.displayName,
+            character_id:      resolvedIdentity?.characterId ?? resolvedCharacterId,
+            character_name:    resolvedIdentity?.characterName ?? resolvedActorName,
+            foundry_user_id:   basePayload.foundry_user_id,
+            foundry_user_name: basePayload.foundry_user_name ?? foundryName,
+            is_gm:             basePayload.is_gm ?? (
+              resolvedIdentity?.userRole ? ['GM', 'GM_PRINCIPAL'].includes(resolvedIdentity.userRole) : undefined
+            ),
+          }),
+        }
+      : basePayload;
 
     let res;
     try {
@@ -219,7 +251,7 @@ export async function sessionEventRoutes(fastify) {
           resolvedActorName,
           resolvedCharacterId,
           resolvedPlayerId,
-          JSON.stringify(payload ?? {}),
+          JSON.stringify(enrichedPayload),
           foundryEventId ?? null,
         ],
       );
@@ -231,6 +263,17 @@ export async function sessionEventRoutes(fastify) {
     }
 
     const event = serializeSessionEvent(res.rows[0]);
+    applyAttendanceProjection({
+      sessionId:   req.params.id,
+      missionId:   sl.mission_id ?? null,
+      eventType:   event.eventType,
+      playerId:    event.playerId,
+      characterId: event.characterId,
+      actorName:   event.actorName,
+      occurredAt:  event.occurredAt,
+    }).catch(err => {
+      req.log.warn({ err, sessionId: req.params.id, eventId: event.id }, 'Falha ao projetar presença em session_attendance');
+    });
     broadcast('SESSION_EVENT_LOGGED', { sessionId: req.params.id, event });
     return reply.code(201).send(event);
   });

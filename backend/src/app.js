@@ -17,6 +17,9 @@
 import Fastify from 'fastify';
 import { signFoundryToken, verifyFoundryToken } from './services/foundryAuth.js';
 import { resolveFoundryMapping } from './services/foundryMap.js';
+import { sideQuestRoutes } from './routes/sideQuests.js';
+import { manaBridgeRoutes, manaPlayerRoutes } from './routes/mana.js';
+import { requireManaServer } from './services/manaAccess.js';
 
 const {
   NODE_ENV    = 'development',
@@ -60,7 +63,13 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
   const dbPool = mockDb ?? (await import('./db/index.js')).pool;
 
   // ── Auth ───────────────────────────────────────────────────────────────────
+  await fastify.register(manaBridgeRoutes);
   fastify.addHook('preHandler', async (req, reply) => {
+    const path = req.url.split('?')[0];
+    if (req.method === 'POST' && (path === '/mana/redeem' || path === '/mana/authorize')) {
+      await requireManaServer(req);
+      return;
+    }
     // Testes: injeta usuário direto
     if (mockUser) {
       req.user = mockUser;
@@ -87,6 +96,7 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
 
   // ── Rotas ──────────────────────────────────────────────────────────────────
   fastify.get('/health', async () => ({ status: 'ok' }));
+  await fastify.register(manaPlayerRoutes);
 
   fastify.get('/foundry/launch', async (req, reply) => {
     if (!req.user?.email) {
@@ -110,7 +120,8 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
     };
 
     const token = signFoundryToken(payload, secret);
-    const url   = new URL(foundryBaseUrl);
+    const base  = foundryBaseUrl.replace(/\/game$/, '');
+    const url   = new URL(`${base}/game`);
     url.searchParams.set('t', token);
 
     return reply.send({ url: url.toString() });
@@ -136,6 +147,7 @@ export async function build({ mockUser = null, mockDb = null, logger = false } =
     }
   });
 
+  await fastify.register(sideQuestRoutes);
   await fastify.ready();
   return fastify;
 }

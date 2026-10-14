@@ -24,6 +24,7 @@ import { runMigrations } from './db/index.js';
 import { cfAuthMiddleware } from './middleware/auth.js';
 import { isFoundryRequest } from './lib/foundryAuth.js';
 import { registerClient } from './ws/broadcast.js';
+import { handleTavernMessage, handleTavernSocketClose } from './services/tavernRoom.js';
 import { postRoutes } from './routes/posts.js';
 import { missionRoutes } from './routes/missions.js';
 import { pollRoutes } from './routes/polls.js';
@@ -40,6 +41,10 @@ import { arcRoutes }     from './routes/arcs.js';
 import { sessionEventRoutes } from './routes/sessionEvents.js';
 import { calendarRoutes } from './routes/calendar.js';
 import { seasonEffectsRoutes } from './routes/seasonEffects.js';
+import { sideQuestRoutes } from './routes/sideQuests.js';
+import { manaBridgeRoutes, manaPlayerRoutes } from './routes/mana.js';
+import { requireManaServer } from './services/manaAccess.js';
+import { startTickEngine } from './jobs/tickEngine.js';
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -78,6 +83,7 @@ await fastify.register(staticFiles, {
 
 // ── Rotas públicas (sem auth) ─────────────────────────────────────────────────
 await fastify.register(configRoutes);
+await fastify.register(manaBridgeRoutes);
 
 fastify.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
 
@@ -96,6 +102,16 @@ fastify.register(async function wsPlugin(app) {
       }
       registerClient(socket, req.user.id);
       socket.send(JSON.stringify({ type: 'CONNECTED', ts: Date.now() }));
+
+      // Taverna: reusa esta mesma conexao pra JOIN/MOVE_REQUEST/DIRECTION_REQUEST/
+      // CHAT_SEND. Antes desta linha o /ws so empurrava eventos pro cliente —
+      // nunca tinha escutado nada vindo dele.
+      socket.on('message', (raw) => {
+        handleTavernMessage(req.user, socket, raw.toString()).catch((err) => {
+          app.log.error({ err }, '[tavern] falha ao processar mensagem do /ws');
+        });
+      });
+      socket.on('close', () => handleTavernSocketClose(socket));
     } catch {
       socket.close(1008, 'Unauthorized');
     }
@@ -105,6 +121,12 @@ fastify.register(async function wsPlugin(app) {
 // ── Hook de autenticação global ───────────────────────────────────────────────
 fastify.addHook('onRequest', async (req, reply) => {
   const path = req.url.split('?')[0];
+
+  // Game server calls use their dedicated credential, never a human session.
+  if (req.method === 'POST' && (path === '/mana/redeem' || path === '/mana/authorize')) {
+    await requireManaServer(req);
+    return;
+  }
 
   // Rotas que não precisam de autenticação
   if (
@@ -147,18 +169,21 @@ await fastify.register(cemeteryCharacterRoutes);
 await fastify.register(mapRoutes);
 await fastify.register(foundryRoutes);
 await fastify.register(profileRoutes);
+await fastify.register(manaPlayerRoutes);
 await fastify.register(sessionRoutes);
 await fastify.register(sessionEventRoutes);
 await fastify.register(seasonEffectsRoutes);
 await fastify.register(arcRoutes);
 await fastify.register(patchNoteRoutes);
 await fastify.register(calendarRoutes);
+await fastify.register(sideQuestRoutes);
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 try {
   await runMigrations();
   startCemeteryDecay();
   startFoundryActorSyncJob();
+  startTickEngine();
   await fastify.listen({
     port: parseInt(process.env.PORT) || 3001,
     host: '0.0.0.0',   // necessário para Docker — proteção é feita pelo Tunnel + firewall

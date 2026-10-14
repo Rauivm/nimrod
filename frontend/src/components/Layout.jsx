@@ -2,7 +2,7 @@ import { Outlet, NavLink } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth, roleLabel, isGM, isGMPrincipal } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
-import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil, UserCircle, BookOpen, Calendar } from 'lucide-react';
+import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil, UserCircle, BookOpen, Calendar, Compass, Gamepad2 } from 'lucide-react';
 import EditDisplayNameModal from './EditDisplayNameModal.jsx';
 
 import { useFoundryLaunch } from '../hooks/useFoundryLaunch.js';
@@ -62,11 +62,17 @@ export default function Layout() {
           </div>
 
           <nav className="main-nav">
+            <NavLink to="/lobby" title="Saguão" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Gamepad2 size={14} /><span>Saguão</span>
+            </NavLink>
             <NavLink to="/" end className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
               <Scroll size={14} /><span>Taverna</span>
             </NavLink>
             <NavLink to="/missions" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
               <Sword size={14} /><span>Missões</span>
+            </NavLink>
+            <NavLink to="/sidequests" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Compass size={14} /><span>Side Quests</span>
             </NavLink>
             <NavLink to="/cemetery" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
               <Skull size={14} /><span>Cemitério</span>

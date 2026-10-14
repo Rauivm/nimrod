@@ -11,6 +11,8 @@ import ProfilePage from './pages/ProfilePage.jsx';
 import PatchNotesPage from './pages/PatchNotesPage.jsx';
 import SessionsPage from './pages/SessionsPage.jsx';
 import CalendarPage from './pages/CalendarPage.jsx';
+import SideQuestsPage from './pages/SideQuestsPage.jsx';
+import LobbyPage from './pages/LobbyPage.jsx';
 
 import SplashScreen from './components/SplashScreen.jsx';
 import LgpdConsentModal from './components/LgpdConsentModal.jsx';
@@ -224,10 +226,16 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<HomePage />} />
+            <Route path="lobby" element={<LobbyPage />} />
 
             <Route
               path="missions"
               element={<MissionsPage />}
+            />
+
+            <Route
+              path="sidequests"
+              element={<SideQuestsPage />}
             />
 
             <Route

@@ -24,8 +24,7 @@ function resolveFoundryLaunchUrl() {
 }
 
 function buildFoundryLaunchUrl(baseUrl, token) {
-  // Foundry serves the game at /game — append it so ?t= is not lost on redirect.
-  const base = baseUrl.replace(/\/game$/, ''); // normalize: no trailing /game
+  const base = baseUrl.replace(/\/game$/, '');
   const url = new URL(`${base}/game`);
   url.searchParams.set('t', token);
   return url.toString();

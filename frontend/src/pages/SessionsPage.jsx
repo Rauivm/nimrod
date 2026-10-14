@@ -44,7 +44,47 @@ const RESOURCE_TYPES = [
   { value: 'custom',     label: 'Personalizado',  icon: Scroll,  color: '#8a9ba8' },
 ];
 
+const AUDIT_RESOURCE = { value: 'audit', label: 'Auditoria', icon: Scroll, color: '#8a9ba8' };
+const FILTER_RESOURCE_TYPES = [...RESOURCE_TYPES, AUDIT_RESOURCE];
+
 const STATUS_LABELS = { open: 'Aberta', closed: 'Encerrada', archived: 'Arquivada' };
+
+const AUDIT_EVENT_LABELS = {
+  SESSION_STARTED: 'Sessao iniciada',
+  SESSION_ENDED: 'Sessao encerrada',
+  PLAYER_CONNECTED: 'Jogador entrou na sessao',
+  PLAYER_DISCONNECTED: 'Jogador saiu da sessao',
+  PLAYER_RECONNECTED: 'Jogador reconectou',
+  PLAYER_IDLE: 'Jogador ficou inativo',
+  PLAYER_ACTIVE: 'Jogador voltou a atividade',
+  PLAYER_HEARTBEAT: 'Presenca confirmada',
+  SCENE_CHANGED: 'Cena alterada',
+  PLAYER_VIEWED_SCENE: 'Jogador visualizou cena',
+  TOKEN_APPEARED: 'Token apareceu na cena',
+  TOKEN_REMOVED: 'Token removido da cena',
+  COMBAT_STARTED: 'Combate iniciado',
+  COMBAT_ENDED: 'Combate encerrado',
+  COMBAT_ENTERED: 'Entrou no combate',
+  COMBAT_EXITED: 'Saiu do combate',
+  COMBAT_ROUND_CHANGED: 'Rodada do combate alterada',
+  COMBAT_TURN_CHANGED: 'Turno do combate alterado',
+  COMBAT_DEFEATED: 'Marcado como derrotado',
+  ITEM_EQUIPPED: 'Item equipado',
+  ITEM_UNEQUIPPED: 'Item desequipado',
+  ITEM_IDENTIFIED: 'Item identificado',
+  ITEM_ATTUNED: 'Item sintonizado',
+  ITEM_UNATTUNED: 'Sintonia removida',
+  FEATURE_USED: 'Habilidade usada',
+  FEATURE_RECOVERED: 'Habilidade recuperada',
+  SPELL_CAST: 'Magia conjurada',
+  DEATH_SAVE_SUCCESS: 'Teste contra morte: sucesso',
+  DEATH_SAVE_FAILURE: 'Teste contra morte: falha',
+  UNCONSCIOUS: 'Personagem inconsciente',
+  DEAD: 'Personagem morreu',
+  REVIVED: 'Personagem revivido',
+  REST_COMPLETED: 'Descanso concluido',
+};
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilitários
@@ -64,6 +104,9 @@ function fmtTime(iso) {
 }
 
 function fmtDelta(delta, resourceType) {
+  if (delta == null || resourceType === 'audit') {
+    return { text: 'log', color: 'var(--text-faint)' };
+  }
   const sign  = delta > 0 ? '+' : '';
   const color = delta > 0 ? 'var(--emerald-bright)' : 'var(--crimson-bright)';
   const unit  = resourceType === 'gold' ? ' po' : resourceType === 'xp' ? ' xp' : '';
@@ -71,7 +114,63 @@ function fmtDelta(delta, resourceType) {
 }
 
 function resourceMeta(type) {
+  if (type === 'audit') return AUDIT_RESOURCE;
   return RESOURCE_TYPES.find(r => r.value === type) ?? RESOURCE_TYPES[6];
+}
+
+function eventTime(event) {
+  return new Date(event.occurredAt ?? event.createdAt ?? 0).getTime();
+}
+
+function sortEventsDesc(events) {
+  return [...events].sort((a, b) => eventTime(b) - eventTime(a));
+}
+
+function humanizeAuditType(type) {
+  return AUDIT_EVENT_LABELS[type] ?? String(type ?? 'Evento').replace(/_/g, ' ').toLowerCase();
+}
+
+function auditDescription(event) {
+  const payload = event.payload ?? {};
+  if (payload.description) return payload.description;
+  const sceneName = payload.sceneName ?? payload.scene_name;
+  const itemName = payload.itemName ?? payload.item_name;
+  const actorName = payload.actorName ?? payload.actor_name;
+  const characterName = payload.characterName ?? payload.character_name;
+  if (sceneName) return `${humanizeAuditType(event.eventType)}: ${sceneName}`;
+  if (itemName) return `${humanizeAuditType(event.eventType)}: ${itemName}`;
+  if (actorName) return `${humanizeAuditType(event.eventType)}: ${actorName}`;
+  if (characterName) return `${humanizeAuditType(event.eventType)}: ${characterName}`;
+  return humanizeAuditType(event.eventType);
+}
+
+function normalizeResourceEvent(event) {
+  return { ...event, kind: 'resource' };
+}
+
+function normalizeAuditEvent(event) {
+  const payload = event.payload ?? {};
+  return {
+    ...event,
+    id: `audit:${event.id}`,
+    rawId: event.id,
+    kind: 'audit',
+    source: 'audit',
+    resourceType: 'audit',
+    delta: null,
+    valueBefore: null,
+    valueAfter: null,
+    deltaMeta: payload,
+    description: auditDescription(event),
+    actorName: event.actorName ?? event.playerName ?? payload.actorName ?? payload.actor_name ?? payload.characterName ?? payload.character_name ?? 'Mesa',
+    registeredByName: event.playerName ?? null,
+  };
+}
+
+function yesNo(value) {
+  if (value === true) return 'Sim';
+  if (value === false) return 'Nao';
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,8 +216,14 @@ function useSessionEvents(sessionId) {
   const load = useCallback(async (id) => {
     if (!id) return;
     setLoading(true);
-    const data = await api.get(`/sessions/${id}/events`).catch(() => []);
-    setEvents(data);
+    const [resourceEvents, auditEvents] = await Promise.all([
+      api.get(`/sessions/${id}/events`).catch(() => []),
+      api.get(`/sessions/${id}/session-events`).catch(() => []),
+    ]);
+    setEvents(sortEventsDesc([
+      ...resourceEvents.map(normalizeResourceEvent),
+      ...auditEvents.map(normalizeAuditEvent),
+    ]));
     setLoading(false);
   }, []);
 
@@ -128,17 +233,24 @@ function useSessionEvents(sessionId) {
     if (!sessionId) return;
     const u1 = on('SESSION_EVENT_CREATED', ({ sessionId: sid, event }) => {
       if (sid !== sessionId) return;
-      setEvents(prev => [event, ...prev.filter(e => e.id !== event.id)]);
+      const normalized = normalizeResourceEvent(event);
+      setEvents(prev => sortEventsDesc([normalized, ...prev.filter(e => e.id !== normalized.id)]));
     });
     const u2 = on('SESSION_EVENT_UPDATED', ({ sessionId: sid, event }) => {
       if (sid !== sessionId) return;
-      setEvents(prev => prev.map(e => e.id === event.id ? event : e));
+      const normalized = normalizeResourceEvent(event);
+      setEvents(prev => sortEventsDesc(prev.map(e => e.id === normalized.id ? normalized : e)));
     });
     const u3 = on('SESSION_EVENT_DELETED', ({ sessionId: sid, eventId }) => {
       if (sid !== sessionId) return;
       setEvents(prev => prev.filter(e => e.id !== eventId));
     });
-    return () => { u1(); u2(); u3(); };
+    const u4 = on('SESSION_EVENT_LOGGED', ({ sessionId: sid, event }) => {
+      if (sid !== sessionId) return;
+      const normalized = normalizeAuditEvent(event);
+      setEvents(prev => sortEventsDesc([normalized, ...prev.filter(e => e.id !== normalized.id)]));
+    });
+    return () => { u1(); u2(); u3(); u4(); };
   }, [on, sessionId]);
 
   return { events, loading, reload: () => load(sessionId) };
@@ -296,8 +408,14 @@ const EventRow = memo(function EventRow({ event, isGMPrincipal, onEdit, onDelete
   const meta   = resourceMeta(event.resourceType);
   const Icon   = meta.icon;
   const delta  = fmtDelta(event.delta, event.resourceType);
+  const isAudit = event.kind === 'audit';
   const isDeleted = !!event.deletedAt;
   const isEdited  = !!event.editedAt;
+  const actorName = event.actorName ?? event.playerName ?? 'Mesa';
+  const sourceLabel =
+    event.source === 'audit'   ? 'Auditoria' :
+    event.source === 'foundry' ? 'Foundry' :
+    event.source === 'manual'  ? 'Manual'  : 'Sistema';
 
   return (
     <div style={{
@@ -330,7 +448,7 @@ const EventRow = memo(function EventRow({ event, isGMPrincipal, onEdit, onDelete
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>
-              {event.actorName}
+              {actorName}
             </span>
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
               {meta.label}
@@ -385,17 +503,21 @@ const EventRow = memo(function EventRow({ event, isGMPrincipal, onEdit, onDelete
             {event.valueAfter != null && (
               <DetailPill label="Depois" value={event.valueAfter} />
             )}
-            <DetailPill label="Fonte" value={
-              event.source === 'foundry' ? '🎲 Foundry' :
-              event.source === 'manual'  ? '✍️ Manual'  : '⚙️ Sistema'
-            } />
+            <DetailPill label="Fonte" value={sourceLabel} />
             <DetailPill label="Registrado por" value={event.registeredByName ?? '—'} />
             {event.playerName && (
               <DetailPill label="Jogador" value={event.playerName} />
             )}
+            {isAudit && event.eventType && (
+              <DetailPill label="Tipo" value={event.eventType} />
+            )}
           </div>
 
-          {event.deltaMeta && Object.keys(event.deltaMeta).length > 0 && (
+          {isAudit && event.eventType === 'PLAYER_HEARTBEAT' && (
+            <HeartbeatAuditDetails event={event} />
+          )}
+
+          {event.deltaMeta && Object.keys(event.deltaMeta).length > 0 && event.eventType !== 'PLAYER_HEARTBEAT' && (
             <div style={{
               fontSize: 11, color: 'var(--text-muted)',
               fontFamily: 'var(--font-mono)',
@@ -406,7 +528,7 @@ const EventRow = memo(function EventRow({ event, isGMPrincipal, onEdit, onDelete
             </div>
           )}
 
-          {isGMPrincipal && !isDeleted && (
+          {isGMPrincipal && !isDeleted && !isAudit && (
             <div style={{ display: 'flex', gap: 8 }}>
               <ActionBtn icon={Pencil} label="Editar" onClick={() => onEdit(event)} />
               <ActionBtn icon={Trash2} label="Cancelar" danger onClick={() => onDelete(event)} />
@@ -423,6 +545,81 @@ const EventRow = memo(function EventRow({ event, isGMPrincipal, onEdit, onDelete
     </div>
   );
 });
+
+function HeartbeatAuditDetails({ event }) {
+  const payload = event.deltaMeta ?? event.payload ?? {};
+  const mainRows = [
+    ['Jogador', payload.display_name ?? event.playerName],
+    ['Personagem', payload.character_name ?? event.actorName],
+    ['Perfil', payload.user_name],
+    ['Foundry', payload.foundry_user_name],
+    ['Mestre', yesNo(payload.is_gm)],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== '');
+
+  const detailRows = [
+    ['User ID', payload.user_id],
+    ['Character ID', payload.character_id],
+    ['Foundry User ID', payload.foundry_user_id],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== '');
+
+  if (!mainRows.length && !detailRows.length) {
+    return event.deltaMeta && Object.keys(event.deltaMeta).length > 0 ? (
+      <div style={{
+        fontSize: 11, color: 'var(--text-muted)',
+        fontFamily: 'var(--font-mono)',
+        background: 'var(--bg-card)', border: '1px solid var(--border)',
+        borderRadius: 3, padding: '4px 8px', marginBottom: 8,
+      }}>
+        {JSON.stringify(event.deltaMeta)}
+      </div>
+    ) : null;
+  }
+
+  return (
+    <div style={{
+      background: 'var(--bg-card)',
+      border: '1px solid var(--border)',
+      borderRadius: 4,
+      padding: '8px 10px',
+      marginBottom: 8,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
+    }}>
+      <div style={{ display: 'grid', gap: 4 }}>
+        {mainRows.map(([label, value]) => (
+          <div key={label} style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            <span style={{ color: 'var(--text-faint)' }}>{label}: </span>
+            <span style={{ color: 'var(--text)' }}>{String(value)}</span>
+          </div>
+        ))}
+      </div>
+
+      {detailRows.length > 0 && (
+        <div style={{
+          borderTop: '1px solid var(--border)',
+          paddingTop: 7,
+          display: 'grid',
+          gap: 3,
+        }}>
+          <div style={{
+            fontSize: 10,
+            color: 'var(--text-faint)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.6px',
+          }}>
+            Detalhes
+          </div>
+          {detailRows.map(([label, value]) => (
+            <div key={label} style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              {label}: {String(value)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function DetailPill({ label, value }) {
   return (
@@ -475,7 +672,7 @@ function EventFilters({ filter, onChange, playerOptions }) {
         style={{ width: 'auto', padding: '4px 8px', fontSize: 12 }}
       >
         <option value="">Todos os recursos</option>
-        {RESOURCE_TYPES.map(r => (
+        {FILTER_RESOURCE_TYPES.map(r => (
           <option key={r.value} value={r.value}>{r.label}</option>
         ))}
       </select>
@@ -500,6 +697,7 @@ function EventFilters({ filter, onChange, playerOptions }) {
         <option value="manual">Manual</option>
         <option value="foundry">Foundry</option>
         <option value="system">Sistema</option>
+        <option value="audit">Auditoria</option>
       </select>
 
       {(filter.resourceType || filter.playerId || filter.source) && (
@@ -1243,6 +1441,7 @@ export default function SessionsPage() {
   const playerOptions = useMemo(() => {
     const seen = new Map();
     events.forEach(e => {
+      if (!e.playerId) return;
       if (!seen.has(e.playerId)) seen.set(e.playerId, e.playerName ?? e.actorName);
     });
     return [...seen.entries()].map(([id, name]) => ({ id, name }));

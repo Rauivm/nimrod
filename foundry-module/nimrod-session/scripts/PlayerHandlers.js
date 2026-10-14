@@ -97,6 +97,7 @@ export class PlayerHandlers {
       ...identity,
       payload: {
         foundry_user_id: game.user.id,
+        foundry_user_name: game.user.name,
         is_gm:           game.user.isGM,
         ...extraPayload,
       },

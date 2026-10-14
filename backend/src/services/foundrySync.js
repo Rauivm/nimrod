@@ -80,6 +80,18 @@ function pickTokenImg(actor = {}) {
   return actor.tokenImg ?? actor.token_img ?? actor.token?.img ?? actor.prototypeToken?.texture?.src ?? actor.prototypeToken?.img ?? null;
 }
 
+function pickAbilities(actor, system) {
+  const abilities = actor.abilities || system.abilities || {};
+  return {
+    str: asNumber(abilities.str?.value ?? abilities.str?.total ?? abilities.str ?? 10, 10),
+    dex: asNumber(abilities.dex?.value ?? abilities.dex?.total ?? abilities.dex ?? 10, 10),
+    con: asNumber(abilities.con?.value ?? abilities.con?.total ?? abilities.con ?? 10, 10),
+    int: asNumber(abilities.int?.value ?? abilities.int?.total ?? abilities.int ?? 10, 10),
+    wis: asNumber(abilities.wis?.value ?? abilities.wis?.total ?? abilities.wis ?? 10, 10),
+    cha: asNumber(abilities.cha?.value ?? abilities.cha?.total ?? abilities.cha ?? 10, 10),
+  };
+}
+
 export function normalizeFoundryActor(actor) {
   const system = actor.system || {};
   const flags = actor.flags?.nimrod || {};
@@ -97,6 +109,7 @@ export function normalizeFoundryActor(actor) {
     race: toText(actor.race ?? system.details?.race),
     isDead: !!(actor.isDead ?? actor.dead ?? flags.isDead),
     isRetired: !!(actor.isRetired ?? actor.retired ?? flags.isRetired),
+    abilities: pickAbilities(actor, system),
     modifiedAt: actor._stats?.modifiedTime ?? actor.updatedAt ?? Date.now(),
   };
 }
@@ -149,9 +162,9 @@ export async function upsertFoundryActors(actors, { markMissingInactive = false 
       `INSERT INTO player_characters (
         foundry_actor_id, name, level, xp, xp_next, classe, race, biography,
         portrait_img, token_img, dead, retired, active, last_synced_at,
-        updated_at, created_at, origin
+        updated_at, created_at, origin, abilities
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE,NOW(),NOW(),NOW(),'foundry')
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE,NOW(),NOW(),NOW(),'foundry', $14)
       ON CONFLICT (foundry_actor_id)
       DO UPDATE SET
         name = EXCLUDED.name,
@@ -168,7 +181,8 @@ export async function upsertFoundryActors(actors, { markMissingInactive = false 
         active = TRUE,
         last_synced_at = NOW(),
         updated_at = NOW(),
-        origin = 'foundry'
+        origin = 'foundry',
+        abilities = EXCLUDED.abilities
       WHERE player_characters.last_synced_at IS NULL
          OR $13 >= EXTRACT(EPOCH FROM player_characters.last_synced_at) * 1000
       RETURNING id`,
@@ -186,6 +200,7 @@ export async function upsertFoundryActors(actors, { markMissingInactive = false 
         a.isDead,
         a.isRetired,
         modifiedAt,
+        JSON.stringify(a.abilities),
       ],
     );
 

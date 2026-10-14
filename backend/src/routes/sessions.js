@@ -100,11 +100,20 @@ const SESSION_SELECT = `
   SELECT
     sl.*,
     COALESCE(gm.display_name, gm.name) AS primary_gm_name,
-    COUNT(rd.id)                        AS event_count
+    COALESCE(rd_counts.event_count, 0) + COALESCE(se_counts.event_count, 0) AS event_count
   FROM session_logs sl
   LEFT JOIN users gm ON gm.id = sl.primary_gm_id
-  LEFT JOIN resource_deltas rd
-         ON rd.session_id = sl.id AND rd.deleted_at IS NULL
+  LEFT JOIN (
+    SELECT session_id, COUNT(*)::int AS event_count
+    FROM resource_deltas
+    WHERE deleted_at IS NULL
+    GROUP BY session_id
+  ) rd_counts ON rd_counts.session_id = sl.id
+  LEFT JOIN (
+    SELECT session_id, COUNT(*)::int AS event_count
+    FROM session_events
+    GROUP BY session_id
+  ) se_counts ON se_counts.session_id = sl.id
 `;
 
 
@@ -113,7 +122,7 @@ async function fetchSession(id) {
   const res = await query(
     `${SESSION_SELECT}
      WHERE sl.id = $1 AND sl.deleted_at IS NULL
-     GROUP BY sl.id, gm.id, gm.display_name, gm.name`,
+     GROUP BY sl.id, gm.id, gm.display_name, gm.name, rd_counts.event_count, se_counts.event_count`,
     [id],
   );
   return res.rows[0] ?? null;
@@ -460,7 +469,7 @@ export async function sessionRoutes(fastify) {
     const sql = `
       ${SESSION_SELECT}
       WHERE ${where.join(' AND ')}
-      GROUP BY sl.id, gm.id, gm.display_name, gm.name
+      GROUP BY sl.id, gm.id, gm.display_name, gm.name, rd_counts.event_count, se_counts.event_count
       ORDER BY sl.started_at DESC
       LIMIT $${params.length}
     `;

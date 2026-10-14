@@ -70,6 +70,27 @@ button {
   touch-action: manipulation;
 }
 
+.mana-launch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--gold-dim);
+  border-radius: var(--radius);
+  background: var(--gold);
+  color: var(--bg);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+}
+.mana-launch > svg { flex-shrink: 0; }
+.mana-launch > span { min-width: 0; overflow-wrap: anywhere; }
+.mana-launch:hover:not(:disabled) { background: var(--gold-bright); }
+.mana-launch:focus-visible { outline: 2px solid var(--gold-bright); outline-offset: 3px; }
+.mana-launch:disabled { opacity: 0.65; cursor: wait; }
+
 input, textarea, select {
   font-family: var(--font-body);
   background: var(--bg-field);
@@ -134,3 +155,14 @@ textarea { resize: vertical; min-height: 80px; }
   animation: shimmer 1.5s infinite;
   border-radius: var(--radius);
 }
+.lobby-entry { max-width: 680px; margin: 0 auto; }
+.lobby-entry header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.lobby-entry h1 { font-family: var(--font-display); color: var(--gold); font-size: 24px; }
+.lobby-character { display: flex; align-items: center; gap: 24px; padding: 24px 0; }
+.lobby-character img { width: 96px; height: 96px; object-fit: cover; border-radius: 50%; border: 2px solid var(--gold-dim); }
+.lobby-character > div { flex: 1; min-width: 0; }
+.lobby-character label { display: block; margin-bottom: 8px; }
+.lobby-character select { width: 100%; min-height: 44px; }
+.lobby-character .mana-launch { width: 100%; }
+.lobby-error { color: var(--crimson-bright); }
+@media (max-width: 480px) { .lobby-character { flex-direction: column; align-items: stretch; } .lobby-character img { align-self: center; } }

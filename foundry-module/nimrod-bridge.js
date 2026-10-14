@@ -116,6 +116,13 @@ const base = () => (game.settings.get(MODULE_ID, 'nimrodUrl') ?? '').replace(/\/
 const key  = () => game.settings.get(MODULE_ID, 'nimrodApiKey') ?? '';
 const hdrs = () => ({ 'Content-Type': 'application/json', 'X-Nimrod-Key': key() });
 
+function contextValue(ctx, ...keys) {
+  for (const key of keys) {
+    if (ctx?.[key] !== undefined && ctx?.[key] !== null) return ctx[key];
+  }
+  return null;
+}
+
 async function nPost(path, body) {
   const res = await fetch(`${base()}${path}`, { method: 'POST', headers: hdrs(), body: JSON.stringify(body) });
   if (!res.ok) { const e = await res.json().catch(() => ({ error: res.statusText })); throw new Error(e.error ?? `HTTP ${res.status}`); }
@@ -126,6 +133,53 @@ async function nGet(path) {
   const res = await fetch(`${base()}${path}`, { headers: hdrs() });
   if (!res.ok) { const e = await res.json().catch(() => ({ error: res.statusText })); throw new Error(e.error ?? `HTTP ${res.status}`); }
   return res.json();
+}
+
+function clearLaunchTokenFromUrl() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has('t')) return;
+  url.searchParams.delete('t');
+  window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+}
+
+async function openMappedActor(actorName) {
+  if (!actorName) return;
+  const actor = game.actors?.find(a => a.name === actorName);
+  if (!actor) {
+    console.warn(`[${MODULE_ID}] Actor mapeado não encontrado: ${actorName}`);
+    return;
+  }
+  actor.sheet?.render(true);
+}
+
+async function consumeLaunchToken() {
+  const token = new URLSearchParams(window.location.search).get('t');
+  if (!token) return false;
+
+  if (!base()) {
+    console.warn(`[${MODULE_ID}] JWT recebido, mas URL do Nimrod não está configurada.`);
+    return false;
+  }
+
+  try {
+    const ctx = await nPost('/nimrod/verify', { token });
+    clearLaunchTokenFromUrl();
+
+    const sessionId = contextValue(ctx, 'sessionId', 'activeSessionId');
+    const actorName = contextValue(ctx, 'actorName', 'actor', 'a');
+
+    if (sessionId) {
+      await onLinked(sessionId);
+    }
+    await openMappedActor(actorName);
+
+    console.info(`%c[${MODULE_ID}] JWT Nimrod validado.`, 'color:#4a9a6a;font-weight:bold');
+    return true;
+  } catch (err) {
+    console.warn(`[${MODULE_ID}] JWT Nimrod inválido ou expirado:`, err.message);
+    clearLaunchTokenFromUrl();
+    return false;
+  }
 }
 
 // ─── Painel UI ────────────────────────────────────────────────────────────────
@@ -520,10 +574,16 @@ function onSessionClosed(sessionId) {
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 Hooks.once('ready', async () => {
+  const launchedFromNimrod = await consumeLaunchToken();
+
   if (!game.user.isGM) {
-    console.info(`[${MODULE_ID}] Não é GM — aguardando sessionId do GM.`);
+    if (!launchedFromNimrod) {
+      console.info(`[${MODULE_ID}] Não é GM — aguardando sessionId do GM.`);
+    }
     return;
   }
+
+  if (launchedFromNimrod) return;
 
   if (!base() || !key()) {
     console.info(`[${MODULE_ID}] URL/API Key não configuradas — aguardando configuração.`);
