@@ -19,6 +19,7 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
   const [actors, setActors]         = useState([]);
   const [allChars, setAllChars]     = useState([]);
   const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState(null);
   const [submitting, setSubmitting] = useState(null); // charId being acted on
 
   // Manual form
@@ -31,9 +32,10 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
   useEffect(() => {
     if (tab !== 'foundry') return;
     setLoading(true);
+    setError(null);
     api.get('/foundry/actors/unlinked')
       .then(setActors)
-      .catch(() => setActors([]))
+      .catch(err => { setActors([]); setError(err.message); })
       .finally(() => setLoading(false));
   }, [tab]);
 
@@ -41,48 +43,53 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
   useEffect(() => {
     if (tab !== 'manage') return;
     setLoading(true);
+    setError(null);
     api.get('/foundry/actors/all-characters')
       .then(setAllChars)
-      .catch(() => setAllChars([]))
+      .catch(err => { setAllChars([]); setError(err.message); })
       .finally(() => setLoading(false));
   }, [tab]);
 
-  const linkActor = async (actorId) => {
-    setSubmitting(actorId);
+  const linkActor = async (charId) => {
+    setError(null);
+    setSubmitting(charId);
     try {
-      await api.patch(`/players/${targetUserId}/characters/${actorId}/link`, {});
+      await api.patch(`/players/${targetUserId}/characters/${charId}/link`, {});
       onLinked?.();
       onClose?.();
-    } catch (err) { alert(err.message); }
+    } catch (err) { setError(err.message); }
     setSubmitting(null);
   };
 
   const unlinkChar = async (charId, charUserId) => {
     if (!confirm('Desvincular este personagem do jogador?')) return;
+    setError(null);
     setSubmitting(charId);
     try {
-      await api.delete(`/players/${charUserId}/characters/${charId}`);
+      await api.delete(`/players/${charUserId}/characters/${charId}/link`);
       // Refresh the manage list
       const data = await api.get('/foundry/actors/all-characters');
       setAllChars(data);
       onLinked?.();
-    } catch (err) { alert(err.message); }
+    } catch (err) { setError(err.message); }
     setSubmitting(null);
   };
 
   const relinkChar = async (charId) => {
+    setError(null);
     setSubmitting(charId);
     try {
       await api.patch(`/players/${targetUserId}/characters/${charId}/link`, {});
       const data = await api.get('/foundry/actors/all-characters');
       setAllChars(data);
       onLinked?.();
-    } catch (err) { alert(err.message); }
+    } catch (err) { setError(err.message); }
     setSubmitting(null);
   };
 
   const createManual = async () => {
     if (!name.trim()) return;
+    setError(null);
     setSubmitting('manual');
     try {
       await api.post(`/players/${targetUserId}/characters`, {
@@ -90,7 +97,7 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
       });
       onLinked?.();
       onClose?.();
-    } catch (err) { alert(err.message); }
+    } catch (err) { setError(err.message); }
     setSubmitting(null);
   };
 
@@ -110,6 +117,12 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
             <X size={16} />
           </button>
         </div>
+
+        {error && (
+          <p role="alert" style={{ padding: '12px 20px', color: 'var(--crimson-bright)' }}>
+            {error}
+          </p>
+        )}
 
         {/* Tabs */}
         <div className="lc-tabs">
@@ -143,7 +156,7 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
                     key={a.id}
                     className="lc-actor-row"
                     onClick={() => linkActor(a.id)}
-                    disabled={submitting === a.id}
+                    disabled={submitting !== null}
                   >
                     <div className="lc-actor-token">
                       {a.tokenImg
@@ -203,7 +216,7 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
                           <button
                             className="lc-action-btn lc-action-link"
                             onClick={() => relinkChar(c.id)}
-                            disabled={busy}
+                            disabled={submitting !== null}
                             title="Vincular a este jogador"
                           >
                             {busy ? '...' : <Link size={12} />}
@@ -214,7 +227,7 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
                           <button
                             className="lc-action-btn lc-action-unlink"
                             onClick={() => unlinkChar(c.id, c.userId)}
-                            disabled={busy}
+                            disabled={submitting !== null}
                             title="Desvincular"
                           >
                             {busy ? '...' : <Unlink size={12} />}

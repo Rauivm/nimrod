@@ -44,9 +44,8 @@ function buildFoundryLaunchUrl(baseUrl, token) {
  */
 
 export async function foundryRoutes(fastify) {
-  // ── GET /foundry/actors  +  GET /foundry/actors/all-characters ───────────
-  // Mesma implementação, duas rotas. /all-characters existe por compatibilidade
-  // com o frontend (LinkCharacterModal e outros).
+  // Foundry actor IDs are used by integrations. Character management lives in
+  // profileRoutes and uses player_characters UUIDs instead.
   async function listFoundryActors(req) {
     const result = await readFoundryActorsDb();
     if (result.available) {
@@ -90,8 +89,7 @@ export async function foundryRoutes(fastify) {
     }));
   }
 
-  fastify.get('/foundry/actors',                listFoundryActors);
-  fastify.get('/foundry/actors/all-characters', listFoundryActors);
+  fastify.get('/foundry/actors', listFoundryActors);
 
 
   // ── GET /nimrod/actor-map ──────────────────────────────────────────────────

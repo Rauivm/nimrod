@@ -6,7 +6,8 @@
  *  GET  /players/:userId/characters       — character list
  *  POST /players/:userId/characters       — GM: manually add a character
  *  PATCH /players/:userId/characters/:id  — GM: link actor to user / retire
- *  DELETE /players/:userId/characters/:id — GM: unlink
+ *  DELETE /players/:userId/characters/:id — GM: delete character
+ *  DELETE /players/:userId/characters/:charId/link — GM: unlink without deleting
  *
  *  GET  /foundry/actors/unlinked          — GM: actors without a user link
  *  POST /foundry/actors/sync              — GM: trigger manual sync
@@ -24,6 +25,15 @@ import { isGM, isAdmin, requireGMPrincipal } from '../lib/roles.js';
 
 const ALLOWED_IMG_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const MAX_AVATAR_BYTES  = 4 * 1024 * 1024; // 4 MB
+
+const CHARACTER_LINK_PARAMS = {
+  type: 'object',
+  required: ['userId', 'charId'],
+  properties: {
+    userId: { type: 'string', format: 'uuid' },
+    charId: { type: 'string', format: 'uuid' },
+  },
+};
 
 function avatarsDir() {
   const base = process.env.UPLOADS_DIR || 'uploads';
@@ -209,8 +219,8 @@ export async function profileRoutes(fastify) {
 
     // Busca todos os personagens ativos de uma vez (evita N+1)
     const charsRes = await query(
-      `SELECT id, user_id, name, level, class, race, active, retired,
-              COALESCE(dead, FALSE) AS dead, token_img_url, foundry_actor_id
+      `SELECT id, user_id, name, level, classe, race, active, retired,
+              COALESCE(dead, FALSE) AS dead, token_img, foundry_actor_id
        FROM player_characters
        WHERE active = TRUE AND retired = FALSE AND COALESCE(dead, FALSE) = FALSE
        ORDER BY name ASC`,
@@ -225,9 +235,9 @@ export async function profileRoutes(fastify) {
         id:             c.id,
         name:           c.name,
         level:          c.level ?? null,
-        class:          c.class ?? null,
+        class:          c.classe ?? null,
         race:           c.race  ?? null,
-        tokenImgUrl:    c.token_img_url ?? null,
+        tokenImgUrl:    c.token_img ?? null,
         foundryActorId: c.foundry_actor_id ?? null,
       });
     }
@@ -377,7 +387,9 @@ export async function profileRoutes(fastify) {
     return char;
   });
 
-  fastify.patch('/players/:userId/characters/:charId/link', async (req, reply) => {
+  fastify.patch('/players/:userId/characters/:charId/link', {
+    schema: { params: CHARACTER_LINK_PARAMS },
+  }, async (req, reply) => {
     if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
     const { userId, charId } = req.params;
 
@@ -395,6 +407,28 @@ export async function profileRoutes(fastify) {
     return char;
   });
 
+  fastify.delete('/players/:userId/characters/:charId/link', {
+    schema: { params: CHARACTER_LINK_PARAMS },
+  }, async (req, reply) => {
+    if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
+    const { userId, charId } = req.params;
+
+    const res = await query(
+      `UPDATE player_characters
+       SET user_id = NULL, updated_at = NOW()
+       WHERE id = $1 AND user_id = $2
+       RETURNING *`,
+      [charId, userId],
+    );
+    if (!res.rows.length) {
+      return reply.code(404).send({ error: 'Vínculo não encontrado. Atualize a lista de personagens.' });
+    }
+
+    const char = serializeChar(res.rows[0]);
+    broadcast('CHARACTER_UPDATED', { userId, character: char });
+    return char;
+  });
+
   // ── DELETE /players/:userId/characters/:id (GM only) ─────────────────────
   fastify.delete('/players/:userId/characters/:id', async (req, reply) => {
     if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
@@ -405,6 +439,19 @@ export async function profileRoutes(fastify) {
     );
     if (!res.rows.length) return reply.code(404).send({ error: 'Not found' });
     return { deleted: true };
+  });
+
+  // Management must use the persisted character UUID, not the Foundry actor ID.
+  fastify.get('/foundry/actors/all-characters', async (req, reply) => {
+    if (!isGM(req.user)) return reply.code(403).send({ error: 'GM only' });
+
+    const res = await query(
+      `SELECT pc.*, COALESCE(u.display_name, u.name) AS user_display_name
+       FROM player_characters pc
+       LEFT JOIN users u ON u.id = pc.user_id
+       ORDER BY pc.name ASC`,
+    );
+    return res.rows.map(r => serializeChar(r));
   });
 
   // ── GET /foundry/actors/unlinked (GM only) ────────────────────────────────
