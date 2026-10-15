@@ -1,0 +1,54 @@
+name: nimrod-mana
+
+services:
+  mana-server:
+    image: nimrod-mana-server:local
+    build:
+      context: ./experiments/source-of-mana
+      dockerfile: docker/Dockerfile
+      target: server
+    restart: unless-stopped
+    environment:
+      MANA_INTEGRATED: ${MANA_INTEGRATED:-false}
+      MANA_NIMROD_API: ${MANA_NIMROD_API:-http://host.docker.internal:3001}
+      MANA_BRIDGE_SECRET: ${MANA_BRIDGE_SECRET:-}
+    ports:
+      - "127.0.0.1:6118:6118/tcp"
+      - "127.0.0.1:6119:6119/udp"
+    volumes:
+      - mana-data:/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6118"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 60s
+
+  mana-web:
+    build:
+      context: ./experiments/source-of-mana
+      dockerfile: docker/Dockerfile
+      target: web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5184:80"
+    depends_on:
+      mana-server:
+        condition: service_healthy
+
+  mana-smoke:
+    profiles: [verify]
+    image: nimrod-mana-server:local
+    environment:
+      MANA_SERVER_ADDRESS: mana-server
+      MANA_SMOKE_ACCOUNT: ${MANA_SMOKE_ACCOUNT:-}
+      MANA_SMOKE_PASSWORD: ${MANA_SMOKE_PASSWORD:-}
+    volumes:
+      - ./experiments/source-of-mana/verification:/opt/mana/verification:ro
+    command: ["godot", "--headless", "--path", "/opt/mana", "res://verification/SmokeClient.tscn"]
+    depends_on:
+      mana-server:
+        condition: service_healthy
+
+volumes:
+  mana-data:

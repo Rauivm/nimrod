@@ -1,0 +1,277 @@
+diff --git a/data/conf/settings.cfg b/data/conf/settings.cfg
+index 530ac81..92e70f3 100644
+--- a/data/conf/settings.cfg
++++ b/data/conf/settings.cfg
+@@ -19,8 +19,8 @@ Session-AccountName=""
+ Session-FirstLogin=true
+ Session-Overlay=[]
+ Session-ShortcutCells=[]
+-Privacy-BugReports=true
+-Network-Local=false
++Privacy-BugReports=false
++Network-Local=true
+ 
+ [Android]
+ Render-Fullscreen=true
+diff --git a/export_presets.cfg b/export_presets.cfg
+index 5253ca3..b1ddd3a 100644
+--- a/export_presets.cfg
++++ b/export_presets.cfg
+@@ -959,9 +959,7 @@ vram_texture_compression/for_desktop=true
+ vram_texture_compression/for_mobile=true
+ html/export_icon=true
+ html/custom_html_shell=""
+-html/head_include="
+-<!-- Automatically added by Sentry SDK -->
+-<script src=\"sentry-bundle.js\" crossorigin=\"anonymous\"></script>"
++html/head_include=""
+ html/canvas_resize_policy=2
+ html/focus_canvas_on_start=true
+ html/experimental_virtual_keyboard=true
+@@ -977,7 +975,7 @@ progressive_web_app/background_color=Color(0, 0, 0, 1)
+ threads/emscripten_pool_size=8
+ threads/godot_pool_size=4
+ sentry/_export_check=true
+-sentry/inject_script=true
++sentry/inject_script=false
+ 
+ [preset.6]
+ 
+diff --git a/project.godot b/project.godot
+index 5e38c62..274b61c 100644
+--- a/project.godot
++++ b/project.godot
+@@ -27,6 +27,7 @@ config/icon="res://data/press/logo/logo_seed.svg"
+ buses/default_bus_layout="res://presets/audio/default_bus_layout.tres"
+ 
+ [autoload]
++NimrodBridge="*res://sources/integration/NimrodBridge.gd"
+ 
+ Launcher="*res://sources/launcher/Launcher.gd"
+ Network="*res://sources/network/Network.gd"
+diff --git a/sources/gui/Gui.gd b/sources/gui/Gui.gd
+index 437fe4e..c66447a 100644
+--- a/sources/gui/Gui.gd
++++ b/sources/gui/Gui.gd
+@@ -118,6 +118,8 @@ func OpenDiscord():
+ 	OS.shell_open(LauncherCommons.DiscordInviteLink)
+ 
+ func DisplayFirstLogin():
++	if NimrodBridge.client_identity.get("scope") == "lobby":
++		return
+ 	if LauncherCommons.isWeb:
+ 		UICommons.MessageBox("""Welcome to Source of Mana!
+ 
+diff --git a/sources/gui/Settings.gd b/sources/gui/Settings.gd
+index 2acaf46..d847d6f 100644
+--- a/sources/gui/Settings.gd
++++ b/sources/gui/Settings.gd
+@@ -396,7 +396,7 @@ func set_localserver(enable : bool):
+ 	SetVal("Network-Local", enable)
+ 	apply_localserver(enable)
+ func apply_localserver(_enable : bool):
+-	var isLocal : bool = OS.is_debug_build() and GetVal("Network-Local")
++	var isLocal : bool = GetVal("Network-Local")
+ 	if isLocal != NetworkCommons.IsLocal:
+ 		NetworkCommons.IsLocal = isLocal
+ 		if NetworkCommons.IsLocal:
+diff --git a/sources/map/Map.gd b/sources/map/Map.gd
+index e54d66b..50da761 100644
+--- a/sources/map/Map.gd
++++ b/sources/map/Map.gd
+@@ -98,6 +98,8 @@ func SpawnEntity(agentRID : int, entry : EntityCacheEntry) -> Entity:
+ 
+ 	var isPlayerType : bool = entry.actorType == ActorCommons.Type.PLAYER
+ 	var isLocalPlayer : bool = isPlayerType and entry.nick == Launcher.GUI.characterPanel.characterNameDisplay.get_text()
++	if not NimrodBridge.client_identity.is_empty():
++		isLocalPlayer = isPlayerType and agentRID == int(NimrodBridge.client_identity.get("agent_rid", 0))
+ 
+ 	var entity : Entity = Instantiate.CreateEntity(entry.actorType, entityData, entityData._name if entry.nick.is_empty() else entry.nick, isLocalPlayer)
+ 	entity.agentRID = agentRID
+diff --git a/sources/network/Network.gd b/sources/network/Network.gd
+index 74cc70d..c649b7d 100644
+--- a/sources/network/Network.gd
++++ b/sources/network/Network.gd
+@@ -33,6 +33,22 @@ enum EChannel
+ }
+ 
+ # Auth
++@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
++func LobbyAction(action: String, target: int, game_id: int, peerID: int = NetworkCommons.PeerAuthorityID) -> bool:
++	return CallServer("LobbyAction", [action, target, game_id], peerID, 300)
++
++@rpc("authority", "call_remote", "reliable", EChannel.ACTION)
++func LobbyState(snapshot: Dictionary, peerID: int = NetworkCommons.PeerOfflineID):
++	CallClient("LobbyState", [snapshot], peerID)
++
++@rpc("any_peer", "call_remote", "reliable", EChannel.CONNECT)
++func LoginWithNimrod(token: String, peerID: int = NetworkCommons.PeerAuthorityID) -> bool:
++	return CallServer("LoginWithNimrod", [token], peerID, NetworkCommons.DelayLogin)
++
++@rpc("authority", "call_remote", "reliable", EChannel.CONNECT)
++func NimrodIdentity(identity: Dictionary, peerID: int = NetworkCommons.PeerOfflineID):
++	CallClient("NimrodIdentity", [identity], peerID)
++
+ @rpc("any_peer", "call_remote", "reliable", EChannel.CONNECT)
+ func CreateAccount(accountName : String, password : String, email : String, rememberMe : bool, platform : int = NetworkCommons.Platform.UNKNOWN, peerID : int = NetworkCommons.PeerAuthorityID) -> bool:
+ 	return CallServer("CreateAccount", [accountName, password, email, rememberMe, platform], peerID, NetworkCommons.DelayLogin)
+@@ -537,6 +553,18 @@ func IsServerReachable() -> bool:
+ 	return Client.IsPeerConnected()
+ 
+ func CallServer(methodName : StringName, args : Array, peerID : int, actionDelta : int = NetworkCommons.DelayDefault) -> bool:
++	if not Client:
++		# RPC arguments are untrusted; use the sender from the polling transport.
++		for server in [WebSocketServer, ENetServer, WebRTCServer]:
++			if server:
++				var sender: int = server.multiplayerAPI.get_remote_sender_id()
++				if sender > 0:
++					peerID = sender
++					break
++		if not NimrodBridge.Allowed(Peers.GetPeer(peerID), methodName, args):
++			if methodName in ["CreateAccount", "LoginWithPassword", "LoginWithToken"]:
++				AuthError(NetworkCommons.AuthError.ERR_TOKEN, peerID)
++			return false
+ 	if not Peers.Footprint(peerID, methodName, actionDelta):
+ 		return false
+ 	if Client and not Client.isOffline:
+diff --git a/sources/network/NetworkCommons.gd b/sources/network/NetworkCommons.gd
+index 05dce42..02cda71 100644
+--- a/sources/network/NetworkCommons.gd
++++ b/sources/network/NetworkCommons.gd
+@@ -10,7 +10,7 @@ const WebSocketPort : int				= 6108
+ const ENetPort : int					= 6109
+ const ServerAddress : String			= "som.manasource.org"
+ 
+-const LocalServerAddress : String		= "127.0.0.1"
++static var LocalServerAddress : String	= OS.get_environment("MANA_SERVER_ADDRESS") if OS.has_environment("MANA_SERVER_ADDRESS") else "127.0.0.1"
+ const MaxPlayerCount : int				= 128
+ 
+ # Visibility
+@@ -86,8 +86,8 @@ static func ComputeProtocolVersion(network : Node) -> int:
+ # Peer
+ const UseENet : bool					= true
+ const UseWebSocket : bool				= true
+-const UseWebRTC : bool					= true
+-static var IsLocal : bool				= false
++const UseWebRTC : bool					= false
++static var IsLocal : bool				= true
+ 
+ # WebRTC signaling
+ const IceServers : Array[Dictionary]	= [{ "urls": "stun:stun.l.google.com:19302" }]
+diff --git a/sources/network/client/Client.gd b/sources/network/client/Client.gd
+index 12620da..49aba5d 100644
+--- a/sources/network/client/Client.gd
++++ b/sources/network/client/Client.gd
+@@ -1,6 +1,12 @@
+ extends NetInterface
+ class_name NetClient
+ 
++func LobbyState(snapshot: Dictionary, _peerID: int):
++	NimrodBridge.social.Receive(snapshot)
++
++func NimrodIdentity(identity: Dictionary, _peerID: int):
++	NimrodBridge.AcceptIdentity(identity)
++
+ #
+ func WarpPlayer(mapID : int, playerPos : Vector2, _peerID : int):
+ 	if Launcher.Map:
+@@ -489,7 +495,12 @@ func _enter_tree():
+ 	var tlsOptions : TLSOptions = TLSOptions.client_unsafe()
+ 	if useWebSocket:
+ 		var prefix : String = "ws://" if isLocal else "wss://"
+-		ret = currentPeer.create_client(prefix + serverAddress + ":" + str(serverPort), tlsOptions)
++		var endpoint : String = prefix + serverAddress + ":" + str(serverPort)
++		if OS.has_feature("web"):
++			var location = JavaScriptBridge.get_interface("window").location
++			prefix = "wss://" if str(location.protocol) == "https:" else "ws://"
++			endpoint = prefix + str(location.host) + "/game-ws"
++		ret = currentPeer.create_client(endpoint, tlsOptions)
+ 	else:
+ 		ret = currentPeer.create_client(serverAddress, serverPort)
+ 		if ret == OK and not isLocal:
+diff --git a/sources/network/server/Peers.gd b/sources/network/server/Peers.gd
+index 4602421..f7f3f4e 100644
+--- a/sources/network/server/Peers.gd
++++ b/sources/network/server/Peers.gd
+@@ -19,6 +19,7 @@ class AccountData:
+ 
+ class Peer:
+ 	extends RefCounted
++	var nimrod: Dictionary = {}
+ 
+ 	var accountID : int								= NetworkCommons.PeerUnknownID
+ 	var peerID : int								= NetworkCommons.PeerUnknownID
+diff --git a/sources/network/server/Server.gd b/sources/network/server/Server.gd
+index 89cc890..299533f 100644
+--- a/sources/network/server/Server.gd
++++ b/sources/network/server/Server.gd
+@@ -1,7 +1,13 @@
+ extends NetInterface
+ class_name NetServer
+ 
++func LobbyAction(action: String, target: int, game_id: int, peerID: int):
++	NimrodBridge.social.Action(action, target, game_id, peerID)
++
+ # Auth
++func LoginWithNimrod(token: String, peerID: int):
++	NimrodBridge.Login(token, peerID)
++
+ func CreateAccount(accountName : String, password : String, email : String, rememberMe : bool, platform : int, peerID : int):
+ 	var err : NetworkCommons.AuthError = NetworkCommons.AuthError.ERR_OK
+ 	var peer : Peers.Peer = Peers.GetPeer(peerID)
+@@ -185,11 +191,19 @@ func ConnectCharacter(nickname : String, peerID : int):
+ 				err = NetworkCommons.CharacterError.ERR_NO_CHARACTER_ID
+ 			else:
+ 				var charInfo : Dictionary = Launcher.SQL.GetCharacterInfo(peer.characterID)
+-				var spawnLocation : SpawnObject = PlayerAgent.GetSpawnFromData(charInfo)
+-				var agent : PlayerAgent = WorldAgent.CreateAgent(spawnLocation, 0, nickname)
++				var spawnLocation : SpawnObject = NimrodBridge.LobbySpawn(charInfo, peer)
++				if not spawnLocation:
++					Network.CharacterError(NetworkCommons.CharacterError.ERR_NO_CHARACTER_ID, peerID)
++					return
++				var display_name: String = str(peer.nimrod.get("character_name", nickname))
++				var agent : PlayerAgent = WorldAgent.CreateAgent(spawnLocation, 0, display_name)
+ 				if agent:
+ 					agent.peerID = peerID
+ 					peer.SetAgent(agent.get_rid().get_id())
++					if not peer.nimrod.is_empty():
++						peer.nimrod["agent_rid"] = agent.get_rid().get_id()
++						peer.nimrod["game_character_id"] = peer.characterID
++						Network.NimrodIdentity(peer.nimrod, peerID)
+ 					agent.SetCharacterInfo(charInfo, peer.characterID)
+ 					agent.stat.buffs.Restore(peer.characterID)
+ 					Launcher.SQL.CharacterLogin(peer.characterID)
+@@ -284,6 +298,12 @@ func TriggerEmote(emoteID : int, peerID : int):
+ func TriggerChat(channelName : String, text : String, peerID : int):
+ 	var player : PlayerAgent = Peers.GetAgent(peerID)
+ 	if player:
++		if NimrodBridge.social.IsLobby(Peers.GetPeer(peerID)):
++			if not NimrodBridge.social.ChatAllowed(peerID, text):
++				return
++			# Lobby uses the existing proximity transport; escape rich-text tags.
++			Network.NotifyNeighbours(player, "ChatPlayer", [str(GUICommons.ChatChannel.LOCAL), player.nick.replace("[", "[lb]"), text.strip_edges().replace("[", "[lb]"), player.get_rid().get_id()])
++			return
+ 		if channelName == str(GUICommons.ChatChannel.LOCAL):
+ 			Network.NotifyNeighbours(player, "ChatPlayer", [str(GUICommons.ChatChannel.LOCAL), player.nick, text, player.get_rid().get_id()])
+ 		elif channelName == str(GUICommons.ChatChannel.GLOBAL):
+diff --git a/sources/system/Monitoring.gd b/sources/system/Monitoring.gd
+index 335757d..926ec36 100644
+--- a/sources/system/Monitoring.gd
++++ b/sources/system/Monitoring.gd
+@@ -15,14 +15,14 @@ static func BeforeSend(event : SentryEvent) -> SentryEvent:
+ 	return event if IsEnabled() else null
+ 
+ static func SetPlayer(playerName : String):
+-	if SentrySDK.is_enabled() and not playerName.is_empty():
++	if IsEnabled() and OS.has_feature("sentry") and SentrySDK.is_enabled() and not playerName.is_empty():
+ 		var user : SentryUser = SentryUser.new()
+ 		user.username = playerName
+ 		SentrySDK.set_user(user)
+ 		SentrySDK.set_tag("player", playerName)
+ 
+ static func SetTransport(transport : Peers.TransportType):
+-	if SentrySDK.is_enabled():
++	if IsEnabled() and OS.has_feature("sentry") and SentrySDK.is_enabled():
+ 		SentrySDK.set_tag("transport", Peers.TransportType.keys()[transport].to_lower())
+ 
+ #

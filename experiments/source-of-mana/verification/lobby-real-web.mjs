@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { mkdir } from 'node:fs/promises';
+await mkdir(new URL('../artifacts/', import.meta.url), { recursive: true });
+const require = createRequire(new URL('../../../backend/package.json', import.meta.url));
+const { chromium } = require('playwright');
+const browser = await chromium.launch({ channel: 'msedge', headless: true,
+  args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader'] });
+try {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await context.addInitScript(() => localStorage.setItem('lgpd_seen', 'true'));
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  const response = await context.request.get('http://localhost:8088/api/me/characters');
+  assert.equal(response.status(), 200);
+  const characters = (await response.json()).filter(c => c.active && !c.retired && !c.dead);
+  assert.ok(characters.length > 0, 'No real eligible character is linked to the authenticated account.');
+  await page.goto('http://localhost:8088/lobby');
+  await page.getByLabel('Personagem', { exact: true }).waitFor();
+  if (characters.length > 1) await page.getByLabel('Personagem', { exact: true }).selectOption(characters[0].id);
+  const button = page.getByRole('button', { name: `Entrar como ${characters[0].name}`, exact: true });
+  await button.waitFor();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: fileURLToPath(new URL('../artifacts/lobby-real-desktop.png', import.meta.url)) });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: fileURLToPath(new URL('../artifacts/lobby-real-mobile.png', import.meta.url)) });
+  const popup = context.waitForEvent('page');
+  await button.click();
+  const game = await popup;
+  const messages = [];
+  game.on('console', m => messages.push(m.text()));
+  game.on('pageerror', e => errors.push(e.message));
+  await game.bringToFront();
+  await game.waitForLoadState();
+  for (let i = 0; i < 70 && !messages.some(m => m.includes('Entering new FSM state: IN_GAME')); i++) await game.waitForTimeout(1000);
+  await game.screenshot({ path: fileURLToPath(new URL('../artifacts/lobby-real-game.png', import.meta.url)) });
+  assert.ok(messages.some(m => m.includes('Entering new FSM state: IN_GAME')), messages.join('\n'));
+  assert.ok(!messages.some(m => m.includes('SCRIPT ERROR')), messages.join('\n'));
+  assert.equal(new URL(game.url()).hash, '');
+  assert.deepEqual(errors, []);
+  await game.waitForTimeout(2500);
+  await game.screenshot({ path: fileURLToPath(new URL('../artifacts/lobby-real-game.png', import.meta.url)) });
+  console.log(`LOBBY_REAL_PASS: authenticated existing Nimrod character=${characters[0].name}; automatic browser launch, desktop/mobile, no fixtures or alternative login`);
+  await context.close();
+} finally { await browser.close(); }

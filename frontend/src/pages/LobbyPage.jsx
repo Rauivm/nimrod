@@ -2,9 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { Gamepad2, RefreshCw } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { Link } from 'react-router-dom';
+import { useExperience } from '../contexts/ExperienceContext.jsx';
+import '../styles/experience.css';
 
 export default function LobbyPage() {
   const { user } = useAuth();
+  const { chooseMode } = useExperience();
   const [characters, setCharacters] = useState([]);
   const [selected, setSelected] = useState('');
   const [loading, setLoading] = useState(true);
@@ -33,21 +37,29 @@ export default function LobbyPage() {
     setError('');
     try {
       const result = await api.post('/mana/launch', { character_id: selected });
-      if (tab) tab.location.replace(result.url);
-      else window.location.assign(result.url);
+      const gameUrl = new URL(result.url);
+      // Navigation only: the game never receives the human session or API key.
+      gameUrl.searchParams.set('nimrod_origin', window.location.origin);
+      chooseMode('game');
+      if (tab) tab.location.replace(gameUrl.href);
+      else window.location.assign(gameUrl.href);
     } catch (err) { tab?.close(); setError(err.message); }
     finally { setLaunching(false); }
-  }, [selected, launching]);
+  }, [selected, launching, chooseMode]);
   const character = characters.find(c => c.id === selected);
   const image = character?.tokenImg || character?.portraitImg;
   return (
     <section className="lobby-entry animate-in" aria-labelledby="lobby-title">
-      <header><h1 id="lobby-title">Saguão da Taverna</h1>
+      <header><h1 id="lobby-title">Inn do Nimrod</h1>
         <button className="btn btn-ghost" title="Atualizar personagens" aria-label="Atualizar personagens"
           disabled={loading} onClick={() => setRevision(v => v + 1)}><RefreshCw size={18} /></button></header>
+      <div className="hub-entry-intro"><span className="experience-eyebrow">Modo Jogo · Taverna social</span>
+        <p>Entre com um personagem vinculado, encontre a comunidade e escolha sua próxima aventura com calma.</p>
+        <div className="hub-entry-areas"><span>Balcão da anfitriã</span><span>Mesas de convivência</span><span>Salão central</span><span>Mural de aventuras</span></div>
+      </div>
       {error && <p role="alert" className="lobby-error">{error}</p>}
       {loading ? <p role="status">Carregando personagens...</p> : <>
-        {!characters.length && !error && <p>Nenhum personagem elegível vinculado à sua conta. Vincule um personagem no Perfil.</p>}
+        {!characters.length && !error && <p>Nenhum personagem elegível vinculado à sua conta. <Link to="/profile">Vincule um personagem no Perfil.</Link></p>}
         {!!characters.length && <div className="lobby-character">
           {image && failedImage !== image && <img src={image.startsWith('/') || image.startsWith('https://') ? image : `/api/foundry/assets?path=${encodeURIComponent(image)}`} alt={character.name} onError={() => setFailedImage(image)} />}
           <div><label htmlFor="lobby-character">Personagem</label>
@@ -62,6 +74,11 @@ export default function LobbyPage() {
           </div>
         </div>}
       </>}
+      <p className="hub-entry-help">A taverna é uma sala compartilhada. Use WASD, toque ou clique para circular e o chat local para conversar. Entrar não inscreve você em uma missão.</p>
+      <nav className="hub-entry-actions" aria-label="Opções da taverna">
+        <Link to="/missions">Ver mural de aventuras</Link>
+        <Link to="/" onClick={() => chooseMode('classic')}>Voltar ao Modo Clássico</Link>
+      </nav>
     </section>
   );
 }

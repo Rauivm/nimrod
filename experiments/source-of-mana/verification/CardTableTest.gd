@@ -1,0 +1,33 @@
+extends Node
+
+func _ready():
+	var table = preload("res://sources/integration/CardTable.gd").new()
+	assert(not table.Invite(1, 1))
+	assert(table.Invite(1, 2))
+	assert(not table.Invite(1, 3))
+	assert(not table.Invite(3, 2))
+	assert(not table.Act(3, 1, "accept"))
+	assert(not table.Act(1, 1, "accept"))
+	assert(table.Snapshot(2).cards.is_empty())
+	assert(table.Act(2, 1, "accept"))
+	assert(not table.Act(2, 1, "accept"))
+	assert(table.Act(1, 1, "reveal"))
+	assert(not table.Act(1, 1, "reveal"))
+	assert(table.Snapshot(2).cards.is_empty())
+	assert(table.Act(2, 1, "reveal"))
+	var result: Dictionary = table.Snapshot(1)
+	assert(result.stage == "finished" and result.cards.size() == 2)
+	var winner: int = 1 if result.cards[0] > result.cards[1] else 2 if result.cards[1] > result.cards[0] else 0
+	assert(result.winner == winner)
+	assert(table.Prune([1]))
+	assert(table.Snapshot(1).is_empty())
+	assert(table.Invite(1, 2))
+	table.games[2].deadline = Time.get_ticks_msec() - 1
+	assert(not table.Act(2, 2, "accept"))
+	assert(table.Prune([1, 2]))
+	assert(table.Invite(1, 2))
+	assert(table.Act(2, 3, "accept"))
+	assert(table.Prune([1]))
+	assert(table.games.is_empty())
+	print("CARD_TABLE_PASS: invite/authorization, hidden cards, duplicate rejection, server result, disconnect/timeout cleanup")
+	get_tree().quit(0)

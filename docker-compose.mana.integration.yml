@@ -1,0 +1,14 @@
+# Overlay for the existing Nimrod stack (started separately).
+services:
+  mana-server:
+    environment:
+      MANA_INTEGRATED: "true"
+      MANA_NIMROD_API: http://backend:3001
+      MANA_BRIDGE_SECRET: ${MANA_BRIDGE_SECRET:?Configure the same dedicated secret in Nimrod and Mana}
+    networks:
+      - default
+      - nimrod
+networks:
+  nimrod:
+    external: true
+    name: ${NIMROD_NETWORK:-nimrod_default}

@@ -1,0 +1,42 @@
+services:
+  mana-integration-web:
+    image: nimrod-mana-mana-web
+    profiles: [verify]
+    environment:
+      MANA_WS_HOST: mana-integration-server
+    ports:
+      - "127.0.0.1:5185:80"
+    depends_on:
+      mana-integration-server:
+        condition: service_healthy
+  mana-integration-server:
+    image: nimrod-mana-server:local
+    profiles: [verify]
+    environment:
+      MANA_INTEGRATED: "true"
+      MANA_NIMROD_API: http://host.docker.internal:5186
+      MANA_BRIDGE_SECRET: ${MANA_BRIDGE_SECRET:-}
+    tmpfs:
+      - /data:uid=1000,gid=1000
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6118"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+  mana-test-db:
+    image: postgres:16-alpine
+    profiles: [verify]
+    environment:
+      POSTGRES_DB: mana_integration_test
+      POSTGRES_USER: mana_test
+      POSTGRES_PASSWORD: local_test_only
+    ports:
+      - "127.0.0.1:55436:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U mana_test -d mana_integration_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

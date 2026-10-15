@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
 import { AuthProvider } from './contexts/AuthContext.jsx';
 import { WsProvider } from './contexts/WsContext.jsx';
+import { ExperienceProvider } from './contexts/ExperienceContext.jsx';
 import './index.css';
 
 createRoot(document.getElementById('root')).render(
@@ -11,7 +12,7 @@ createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <AuthProvider>
         <WsProvider>
-          <App />
+          <ExperienceProvider><App /></ExperienceProvider>
         </WsProvider>
       </AuthProvider>
     </BrowserRouter>

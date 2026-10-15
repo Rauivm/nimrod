@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 
 import Layout from './components/Layout.jsx';
 
-import HomePage from './pages/HomePage.jsx';
+import ExperienceEntryPage from './pages/ExperienceEntryPage.jsx';
 import MissionsPage from './pages/MissionsPage.jsx';
 import CemeteryPage from './pages/CemeteryPage.jsx';
 import MapsPage from './pages/MapsPage.jsx';
@@ -132,7 +132,7 @@ function PollNotificationBanner() {
         )}
       </div>
       <a
-        href="/"
+        href="/?experience=classic"
         onClick={() => setBanner(null)}
         style={{
           flexShrink: 0,
@@ -225,7 +225,7 @@ export default function App() {
       {!loading && splashDone && (
         <Routes>
           <Route path="/" element={<Layout />}>
-            <Route index element={<HomePage />} />
+            <Route index element={<ExperienceEntryPage />} />
             <Route path="lobby" element={<LobbyPage />} />
 
             <Route

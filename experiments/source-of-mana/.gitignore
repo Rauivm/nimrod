@@ -1,0 +1,4 @@
+game/
+artifacts/
+.cache/
+!.dockerignore

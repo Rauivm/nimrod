@@ -1,0 +1,5 @@
+# Local-only prerequisite for the already existing tavern WebSocket service.
+services:
+  backend:
+    volumes:
+      - ./experiments/tavern/assets/tavern-collision.json:/app/src/services/tavernCollision.json:ro

@@ -2,6 +2,7 @@ import { Outlet, NavLink } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth, roleLabel, isGM, isGMPrincipal } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
+import { useExperience } from '../contexts/ExperienceContext.jsx';
 import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil, UserCircle, BookOpen, Calendar, Compass, Gamepad2 } from 'lucide-react';
 import EditDisplayNameModal from './EditDisplayNameModal.jsx';
 
@@ -50,6 +51,7 @@ function UserChip({ user }) {
 export default function Layout() {
   const { user } = useAuth();
   const { connected } = useWs();
+  const { chooseMode } = useExperience();
 
   return (
     <div className="layout">
@@ -62,11 +64,11 @@ export default function Layout() {
           </div>
 
           <nav className="main-nav">
-            <NavLink to="/lobby" title="Saguão" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Gamepad2 size={14} /><span>Saguão</span>
+            <NavLink to="/lobby" aria-label="Modo Jogo" title="Taverna multiplayer" onClick={() => chooseMode('game')} className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Gamepad2 size={14} /><span>Modo Jogo</span>
             </NavLink>
-            <NavLink to="/" end className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Scroll size={14} /><span>Taverna</span>
+            <NavLink to="/" end aria-label="Modo Clássico" onClick={() => chooseMode('classic')} className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Scroll size={14} /><span>Modo Clássico</span>
             </NavLink>
             <NavLink to="/missions" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
               <Sword size={14} /><span>Missões</span>

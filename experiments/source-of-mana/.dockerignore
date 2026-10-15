@@ -1,0 +1,7 @@
+game/.git
+game/.godot
+game/android
+artifacts
+.cache
+docs
+verification/browser-check.cjs
