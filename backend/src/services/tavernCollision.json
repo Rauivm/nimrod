@@ -1,0 +1,42 @@
+{
+  "mapId": "taverna-do-grifo-dourado-topdown",
+  "imageWidth": 1024,
+  "imageHeight": 1536,
+  "notes": "Coordenadas em fracao (0..1) da imagem de fundo. walkableArea define a UNICA regiao onde jogadores podem estar; obstacles bloqueiam mobilia dentro dela. Calibrado a olho sobre o mapa top-down atual — ajustar aqui, nao na engine, se o mapa mudar. Cozinha (canto superior-esquerdo) e o alpendre/varanda alem das portas duplas ficaram de fora do walkableArea nesta primeira passada (sem transicao de sala implementada ainda).",
+
+  "walkableArea": {
+    "type": "polygon",
+    "points": [
+      [0.23, 0.21],
+      [0.78, 0.21],
+      [0.78, 0.35],
+      [0.90, 0.35],
+      [0.90, 0.58],
+      [0.85, 0.58],
+      [0.85, 0.87],
+      [0.23, 0.87]
+    ]
+  },
+
+  "obstacles": [
+    { "id": "balcao-taverneiro", "type": "rect", "x": 0.33, "y": 0.15, "width": 0.45, "height": 0.07 },
+    { "id": "piano", "type": "rect", "x": 0.22, "y": 0.32, "width": 0.16, "height": 0.08 },
+    { "id": "mesa-bilhar", "type": "rect", "x": 0.32, "y": 0.63, "width": 0.12, "height": 0.13 },
+
+    { "id": "mesa-01", "type": "circle", "cx": 0.395, "cy": 0.313, "radius": 0.048 },
+    { "id": "mesa-02", "type": "circle", "cx": 0.688, "cy": 0.348, "radius": 0.048 },
+    { "id": "mesa-03", "type": "circle", "cx": 0.483, "cy": 0.410, "radius": 0.055 },
+    { "id": "mesa-04", "type": "circle", "cx": 0.347, "cy": 0.436, "radius": 0.048 },
+    { "id": "mesa-05", "type": "circle", "cx": 0.679, "cy": 0.459, "radius": 0.038 },
+    { "id": "mesa-06", "type": "circle", "cx": 0.435, "cy": 0.501, "radius": 0.048 },
+    { "id": "mesa-07", "type": "circle", "cx": 0.771, "cy": 0.488, "radius": 0.042 },
+    { "id": "mesa-08", "type": "circle", "cx": 0.635, "cy": 0.531, "radius": 0.048 },
+    { "id": "mesa-09", "type": "circle", "cx": 0.327, "cy": 0.553, "radius": 0.048 },
+    { "id": "mesa-10", "type": "circle", "cx": 0.752, "cy": 0.612, "radius": 0.048 },
+    { "id": "mesa-11", "type": "circle", "cx": 0.596, "cy": 0.645, "radius": 0.048 },
+    { "id": "mesa-12", "type": "circle", "cx": 0.698, "cy": 0.710, "radius": 0.048 },
+    { "id": "mesa-13", "type": "circle", "cx": 0.357, "cy": 0.807, "radius": 0.048 },
+    { "id": "mesa-14", "type": "circle", "cx": 0.645, "cy": 0.811, "radius": 0.048 },
+    { "id": "mesa-15", "type": "circle", "cx": 0.796, "cy": 0.789, "radius": 0.045 }
+  ]
+}
