@@ -6,14 +6,18 @@ Interface atual, design system, navegação responsiva, Quadro de Avisos e
 afinidades elementais. O mockup ilustrado e a retenção de capas por 90 dias
 foram somente avaliados; não fazem parte desta versão.
 
-As alterações anteriores de backend, Foundry, nginx e experimentos continuam
-separadas desta entrega. Nenhum arquivo de ambiente ou credencial é incluído.
+O commit inicial da interface foi separado do trabalho anterior. O pacote de
+publicação também inclui, em commit próprio, o backend de missões, seu proxy
+e os arquivos de integração Foundry já implementados de que esta tela depende.
+Os experimentos e a configuração exclusiva do PC permanecem separados.
+Nenhum arquivo de ambiente ou credencial é incluído.
 
 ## Requisito de compatibilidade
 
 Esta interface foi desenvolvida sobre o trabalho anterior de missões que
-ainda estava sem commit no checkout. Publicar o frontend sozinho sobre o
-backend antigo do Git não constitui uma versão funcional homologada.
+estava sem commit no checkout. Esse pré-requisito foi preparado para publicação
+após verificar sua ausência no servidor. Publicar somente o commit inicial
+de frontend sobre o backend antigo não constitui uma versão homologada.
 
 Antes da implantação, conferir a presença do backend compatível com
 `MissionActions`, `MissionNotifications` e `FoundryConnectPage`: inscrições,
@@ -30,13 +34,20 @@ backup e verificação dos dados legados indicados naquele documento.
 - `npm run test:ui` contra o build servido por `vite preview`: 90 cenários
   passaram, 29 estados axe sem violações e nenhum erro de runtime capturado.
 - `git diff --cached --check`: passou antes do commit.
+- Backend associado: 217 testes isolados e 18 de integração PostgreSQL
+  passaram novamente, sem carregar o ambiente de produção.
 
 Os testes de interface usam respostas de API e WebSocket simuladas. Eles não
 substituem a verificação do backend de produção ou de uma sessão real Foundry.
 
 ## Implantação
 
-Pendente de acesso ao servidor e da verificação de compatibilidade acima.
-Não copiar o override Docker exclusivo do PC para produção. Após conferir
-o backend, construir e recriar somente o frontend conforme a configuração
-real do servidor; verificar o build servido e as rotas, preservando os dados.
+Acesso SSH ao servidor confirmado em `/opt/nimrod`. Pré-verificação do banco:
+zero missões com sessões abertas duplicadas e zero capacidades inválidas.
+O servidor tem o commit próprio `13091e7` e o diretório não rastreado
+`foundry-module/nimrod-launcher`, que precisam ser preservados.
+
+Antes de aplicar: conservar backup do banco e referência do código anterior.
+Construir backend e frontend antes de recriar esses dois serviços. Manter
+PostgreSQL, Redis, bridges e túnel existentes. Não copiar o override Docker
+exclusivo do PC para produção. Homologação Foundry real permanece separada.

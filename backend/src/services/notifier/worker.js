@@ -1,4 +1,5 @@
 import { sendDiscordMessage } from './discord.js';
+import { deliverInboxEmail, recoverPendingEmail } from './inbox.js';
 import {
   registerNotifierWorker,
   retryNotification,
@@ -15,6 +16,8 @@ async function processNotifierQueue() {
     try {
       if (job.type === 'discord') {
         await sendDiscordMessage(job.payload);
+      } else if (job.type === 'inbox-email') {
+        await deliverInboxEmail(job.notificationId);
       }
     } catch (err) {
       job.attempts = Number(job.attempts || 0) + 1;
@@ -31,4 +34,5 @@ registerNotifierWorker(processNotifierQueue);
 
 export function startNotifierWorker() {
   scheduleNotifierDrain();
+  recoverPendingEmail().catch(() => {});
 }

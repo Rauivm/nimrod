@@ -1,15 +1,11 @@
-import { query } from '../db/index.js';
+import { query, transaction } from '../db/index.js';
+import { joinMission, participantAction, editMission, transitionMission, gmRequest, resolveGmRequest, vacancyAlert, missionHistory } from '../services/missionBoard.js';
+import { fail,validateMissionFields,requireUuid,validateRequestBody } from '../services/missionRules.js';
 import { broadcast } from '../ws/broadcast.js';
 import { notifyMissionCreated, notifyNoticeCreated } from '../services/notifier/notifier.js';
 import { assertRateLimit } from '../middleware/rateLimit.js';
-import { isGM, isGMPrincipal, isAdmin, requireGM, requireGMPrincipal, requireAdmin } from '../lib/roles.js';
-
-function currentDateValue() {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${now.getFullYear()}-${month}-${day}`;
-}
+import { isGM } from '../lib/roles.js';
+import { emailAvailable } from '../services/notifier/email.js';
 
 function isValidDateValue(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -23,6 +19,10 @@ function isValidTimeValue(value) {
 }
 
 function normalizeMissionDateTime({ datetime, date, time }) {
+  if (typeof datetime === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/.test(datetime)) {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(datetime) || !Number.isFinite(Date.parse(datetime))) throw new Error('Agendamento inválido.');
+    return new Date(datetime).toISOString();
+  }
   let resolvedDate = String(date || '').trim();
   let resolvedTime = String(time || '').trim();
 
@@ -33,8 +33,8 @@ function normalizeMissionDateTime({ datetime, date, time }) {
     resolvedTime ||= match[2];
   }
 
-  resolvedDate ||= currentDateValue();
-  resolvedTime ||= '20:00';
+  if (!resolvedDate && !resolvedTime) return null;
+  if (!resolvedDate || !resolvedTime) throw new Error('Informe data e hora juntas ou deixe ambas vazias.');
 
   if (!isValidDateValue(resolvedDate)) throw new Error('date must use a valid YYYY-MM-DD value');
   if (!isValidTimeValue(resolvedTime)) throw new Error('time must use a valid HH:MM value');
@@ -42,20 +42,21 @@ function normalizeMissionDateTime({ datetime, date, time }) {
   return `${resolvedDate}T${resolvedTime}`;
 }
 
-async function getMissionWithCounts(missionId, userId) {
+export async function getMissionWithCounts(missionId, userId) {
   const res = await query(
     `SELECT m.*,
+            (SELECT COALESCE(gm.display_name,gm.name) FROM users gm WHERE gm.id=m.gm_id) AS gm_name,
             COALESCE(u.display_name, u.name) AS creator_name,
-            COUNT(CASE WHEN mp.type = 'PLAYER' THEN 1 END) as player_count,
-            COUNT(CASE WHEN mp.type = 'RESERVE' THEN 1 END) as reserve_count,
+            COUNT(DISTINCT mp.id) FILTER (WHERE mp.type = 'PLAYER' AND mp.approval_status = 'APPROVED') as player_count,
+            COUNT(DISTINCT mp.id) FILTER (WHERE mp.type = 'RESERVE' AND mp.approval_status = 'APPROVED') as reserve_count,
             EXISTS(SELECT 1 FROM mission_participants WHERE mission_id = m.id AND user_id = $2) as user_joined,
             (SELECT type FROM mission_participants WHERE mission_id = m.id AND user_id = $2) as user_type,
             EXISTS (
               SELECT 1 FROM mission_participants
-              WHERE mission_id = m.id AND user_id = $2 AND type = 'RESERVE'
+              WHERE mission_id = m.id AND user_id = $2 AND type = 'RESERVE' AND approval_status='APPROVED'
             ) AS user_is_reserve,
             ROUND(AVG(mr.stars), 1) as avg_rating,
-            COUNT(mr.stars) as rating_count
+            COUNT(DISTINCT mr.user_id) as rating_count
      FROM missions m
      JOIN users u ON u.id = m.creator_id
      LEFT JOIN mission_participants mp ON mp.mission_id = m.id
@@ -76,7 +77,7 @@ async function getMissionWithCounts(missionId, userId) {
   return mission;
 }
 
-function serializeSessionSummary(row) {
+export function serializeSessionSummary(row) {
   if (!row) return null;
   return {
     id: row.id,
@@ -95,14 +96,15 @@ async function attachMissionRuntime(missions, userId) {
   if (!missions.length) return missions;
   const ids = missions.map(m => m.id);
 
-  let participantRows = [];
-  try {
-    const res = await query(
+  const participantRes = await query(
       `SELECT
+         mp.id AS participant_id,
          mp.mission_id,
          mp.user_id,
          mp.type,
          mp.invited,
+         mp.approval_status,
+         mp.approved_at,
          mp.joined_at,
          u.role,
          COALESCE(u.display_name, u.name) AS player_name,
@@ -121,14 +123,9 @@ async function attachMissionRuntime(missions, userId) {
        ORDER BY mp.type ASC, mp.joined_at ASC`,
       [ids],
     );
-    participantRows = res.rows;
-  } catch {
-    participantRows = [];
-  }
+  const participantRows = participantRes.rows;
 
-  let sessionRows = [];
-  try {
-    const res = await query(
+  const sessionRes = await query(
       `SELECT
          COALESCE(sl.mission_id, ma.mission_id) AS resolved_mission_id,
          sl.*,
@@ -142,18 +139,25 @@ async function attachMissionRuntime(missions, userId) {
        ORDER BY sl.started_at DESC`,
       [ids],
     );
-    sessionRows = res.rows;
-  } catch {
-    sessionRows = [];
-  }
+  const sessionRows = sessionRes.rows;
 
   const participantsByMission = new Map();
   for (const row of participantRows) {
     const list = participantsByMission.get(row.mission_id) ?? [];
     list.push({
+      // Preserve the original detail endpoint's snake_case fields.
+      id:row.participant_id,
+      mission_id:row.mission_id,
+      user_id:row.user_id,
+      character_id:row.character_id ?? null,
+      joined_at:row.joined_at,
+      name:row.player_name,
+      approval_status:row.approval_status,
       userId: row.user_id,
       type: row.type,
       invited: row.invited ?? false,
+      approvalStatus: row.approval_status,
+      approvedAt: row.approved_at,
       joinedAt: row.joined_at,
       playerName: row.player_name,
       role: row.role,
@@ -180,10 +184,20 @@ async function attachMissionRuntime(missions, userId) {
     sessionsByMission.set(missionId, state);
   }
 
+  const gmRows = (await query(`SELECT r.*,COALESCE(u.display_name,u.name) AS name FROM mission_gm_requests r
+    JOIN users u ON u.id=r.user_id WHERE r.mission_id=ANY($1) AND (r.user_id=$2 OR EXISTS(
+      SELECT 1 FROM missions m WHERE m.id=r.mission_id AND m.creator_id=$2)) ORDER BY r.created_at`,[ids,userId])).rows;
+  const watches = (await query('SELECT mission_id FROM mission_vacancy_alerts WHERE mission_id=ANY($1) AND user_id=$2',[ids,userId])).rows;
   return missions.map(m => {
     const sessionState = sessionsByMission.get(m.id) ?? {};
     return {
       ...m,
+      gmRequests:gmRows.filter(r=>r.mission_id===m.id),
+      watching: watches.some(r=>r.mission_id===m.id),
+      emailAlertsAvailable:emailAvailable(),
+      canManage:m.creator_id===userId || m.gm_id===userId,
+      user_approval_status:participantRows.find(r=>r.mission_id===m.id && r.user_id===userId)?.approval_status ?? null,
+      sessions:sessionRows.filter(r=>r.resolved_mission_id===m.id).map(serializeSessionSummary),
       participants: participantsByMission.get(m.id) ?? [],
       activeSession: serializeSessionSummary(sessionState.active),
       lastSession: serializeSessionSummary(sessionState.last),
@@ -228,19 +242,28 @@ async function getPollForMission(pollId, userId) {
 }
 
 export async function missionRoutes(fastify) {
+  fastify.addHook('preValidation',async req=>{
+    for(const name of ['id','userId','requestId'])if(req.params[name]!==undefined)requireUuid(req.params[name]);
+    validateRequestBody(req.body);
+  });
   // GET /missions
   fastify.get('/missions', async (req) => {
     const { status, kind, before } = req.query;
     const limit = Math.min(parseInt(req.query.limit) || 30, 60);
+    if(limit<1)fail(400,'Limite inválido.');
+    if(kind && !['MISSION','NOTICE'].includes(kind.toUpperCase()))fail(400,'Tipo inválido.');
+    if(status && status.split(',').some(s=>!['OPEN','CLOSED','RUNNING','PAUSED','FINISHED','CANCELLED'].includes(s.trim().toUpperCase())))fail(400,'Estado inválido.');
+    if(before && !Number.isFinite(Date.parse(before)))fail(400,'Cursor de data inválido.');
     let sql = `
       SELECT m.*,
+            (SELECT COALESCE(gm.display_name,gm.name) FROM users gm WHERE gm.id=m.gm_id) AS gm_name,
              COALESCE(u.display_name, u.name) AS creator_name,
-             COUNT(CASE WHEN mp.type = 'PLAYER' THEN 1 END) as player_count,
-             COUNT(CASE WHEN mp.type = 'RESERVE' THEN 1 END) as reserve_count,
+             COUNT(DISTINCT mp.id) FILTER (WHERE mp.type = 'PLAYER' AND mp.approval_status = 'APPROVED') as player_count,
+             COUNT(DISTINCT mp.id) FILTER (WHERE mp.type = 'RESERVE' AND mp.approval_status = 'APPROVED') as reserve_count,
              EXISTS(SELECT 1 FROM mission_participants mp2 WHERE mp2.mission_id = m.id AND mp2.user_id = $1) as user_joined,
              EXISTS (
                SELECT 1 FROM mission_participants
-               WHERE mission_id = m.id AND user_id = $1 AND type = 'RESERVE'
+               WHERE mission_id = m.id AND user_id = $1 AND type = 'RESERVE' AND approval_status='APPROVED'
              ) AS user_is_reserve,
              ROUND(AVG(mr.stars), 1) as avg_rating
       FROM missions m
@@ -322,13 +345,7 @@ export async function missionRoutes(fastify) {
     const mission = await getMissionWithCounts(req.params.id, req.user.id);
     if (!mission) return reply.code(404).send({ error: 'Mission not found' });
 
-    const participants = await query(
-      `SELECT mp.*, COALESCE(u.display_name, u.name) AS name, u.role
-       FROM mission_participants mp JOIN users u ON u.id = mp.user_id
-       WHERE mp.mission_id = $1 ORDER BY mp.joined_at ASC`,
-      [req.params.id]
-    );
-    return { ...mission, participants: participants.rows };
+    return mission;
   });
 
   // POST /missions — kind-aware, datetime optional for NOTICE
@@ -350,8 +367,8 @@ export async function missionRoutes(fastify) {
     } = req.body || {};
 
     // Manual validation
-    if (!title?.trim())       return reply.code(400).send({ error: 'title is required' });
-    if (!description?.trim()) return reply.code(400).send({ error: 'description is required' });
+    if (typeof title !== 'string' || !title.trim())       return reply.code(400).send({ error: 'title is required' });
+    if (typeof description !== 'string' || !description.trim()) return reply.code(400).send({ error: 'description is required' });
 
     const resolvedKind = (kind === 'NOTICE') ? 'NOTICE' : 'MISSION';
 
@@ -364,43 +381,27 @@ export async function missionRoutes(fastify) {
       }
     }
 
-    const resolvedMaxPlayers  = parseInt(maxPlayers)  || 4;
-    const resolvedMaxReserves = parseInt(maxReserves) || 2;
-
-    // Create linked poll if provided
-    let pollId = null;
-    const cleanOptions = (pollOptions || []).map(o => String(o).trim()).filter(Boolean);
-    if (pollQuestion?.trim() && cleanOptions.length >= 2) {
-      const pRes = await query(
-        'INSERT INTO polls (creator_id, question) VALUES ($1, $2) RETURNING *',
-        [req.user.id, pollQuestion.trim()]
-      );
-      pollId = pRes.rows[0].id;
-      for (const text of cleanOptions) {
-        await query('INSERT INTO poll_options (poll_id, text) VALUES ($1, $2)', [pollId, text]);
+    const rules = resolvedKind === 'MISSION' ? validateMissionFields(req.body) : null;
+    const deadline = req.body.registrationDeadline ? new Date(req.body.registrationDeadline) : null;
+    if (deadline && !Number.isFinite(deadline.getTime())) return reply.code(400).send({ error: 'Prazo inválido.' });
+    const res = await transaction(async client => {
+      let pollId = null;
+      const cleanOptions = Array.isArray(pollOptions) ? pollOptions.map(o => String(o).trim()).filter(Boolean) : [];
+      if (typeof pollQuestion === 'string' && pollQuestion.trim() && cleanOptions.length >= 2) {
+        pollId = (await client.query('INSERT INTO polls(creator_id,question) VALUES($1,$2) RETURNING id', [req.user.id,pollQuestion.trim()])).rows[0].id;
+        for (const text of cleanOptions) await client.query('INSERT INTO poll_options(poll_id,text) VALUES($1,$2)',[pollId,text]);
       }
-    }
-
-    const res = await query(
-      `INSERT INTO missions
-         (creator_id, kind, title, description, datetime, reward, level, max_players, max_reserves, poll_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-      [
-        req.user.id,
-        resolvedKind,
-        title.trim(),
-        description.trim(),
-        resolvedDateTime,
-        reward?.trim() || null,
-        level?.trim()  || null,
-        resolvedMaxPlayers,
-        resolvedMaxReserves,
-        pollId,
-      ]
-    );
+      return client.query(`INSERT INTO missions
+        (creator_id,kind,title,description,datetime,reward,level,max_players,max_reserves,poll_id,
+         min_players,min_level,max_level,approval_required,registration_deadline,registrations_open)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+        [req.user.id,resolvedKind,title.trim(),description.trim(),resolvedDateTime,reward?.trim() || null,
+         level?.trim() || null,rules?.maxPlayers ?? 4,rules?.maxReserves ?? 2,pollId,
+         rules?.minPlayers ?? null,rules?.minLevel ?? null,rules?.maxLevel ?? null,rules?.approvalRequired ?? false,deadline,resolvedKind==='MISSION']);
+    });
 
     const mission = await getMissionWithCounts(res.rows[0].id, req.user.id);
-    broadcast('MISSION_CREATED', mission);
+    broadcast('MISSION_CREATED', {id:mission.id});
 
     // Notify Discord — split by kind
     if (resolvedKind === 'NOTICE') {
@@ -412,311 +413,63 @@ export async function missionRoutes(fastify) {
     return reply.code(201).send(mission);
   });
 
-  // PATCH /missions/:id
-  fastify.patch('/missions/:id', async (req, reply) => {
-    const { id } = req.params;
-    const existing = await query('SELECT * FROM missions WHERE id = $1', [id]);
-    if (!existing.rows.length) return reply.code(404).send({ error: 'Not found' });
-    if (existing.rows[0].creator_id !== req.user.id && !isGM(req.user)) {
-      return reply.code(403).send({ error: 'Forbidden' });
-    }
-
-    const updates = [];
-    const values  = [];
-
-    const fieldMap = {
-      title: 'title', description: 'description',
-      reward: 'reward', level: 'level',
-      maxPlayers: 'max_players', maxReserves: 'max_reserves', status: 'status',
-    };
-
-    if (req.body.datetime !== undefined || req.body.date !== undefined || req.body.time !== undefined) {
-      try {
-        values.push(normalizeMissionDateTime({
-          datetime: req.body.datetime,
-          date: req.body.date,
-          time: req.body.time,
-        }));
-        updates.push(`datetime = $${values.length}`);
-      } catch (err) {
-        return reply.code(400).send({ error: err.message });
-      }
-    }
-
-    for (const [key, col] of Object.entries(fieldMap)) {
-      if (req.body[key] !== undefined) {
-        values.push(req.body[key]);
-        updates.push(`${col} = $${values.length}`);
-      }
-    }
-
-    if (!updates.length) return reply.code(400).send({ error: 'No fields to update' });
-
-    values.push(id);
-    await query(
-      `UPDATE missions SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${values.length}`,
-      values
-    );
-    const mission = await getMissionWithCounts(id, req.user.id);
-    broadcast('MISSION_UPDATED', mission);
+  async function changed(id, userId) {
+    const mission = await getMissionWithCounts(id,userId);
+    broadcast('MISSION_UPDATED',{id:mission.id});
     return mission;
+  }
+
+  fastify.patch('/missions/:id', async req => {
+    const body = { ...(req.body || {}) };
+    if (body.date !== undefined || body.time !== undefined) body.datetime = normalizeMissionDateTime(body);
+    // Compatibility for OPEN/CLOSED callers, without bypassing transition validation.
+    if (body.status && Object.keys(body).length === 1 && ['OPEN','CLOSED'].includes(body.status)) {
+      await transitionMission(req.params.id,req.user,body.status==='OPEN'?'OPEN_REGISTRATIONS':'CLOSE_REGISTRATIONS');
+    } else await editMission(req.params.id,req.user,body);
+    return changed(req.params.id,req.user.id);
   });
 
-  // DELETE /missions/:id
-  fastify.delete('/missions/:id', async (req, reply) => {
-    const { id } = req.params;
+  fastify.delete('/missions/:id', async (_req, reply) => reply.code(409).send({ error: 'Use o cancelamento com motivo; o histórico da missão deve ser preservado.' }));
 
-    // Verify ownership before touching anything
-    const check = await query(
-      'SELECT id FROM missions WHERE id = $1 AND creator_id = $2',
-      [id, req.user.id],
-    );
-    if (!check.rows.length) return reply.code(404).send({ error: 'Not found or not authorized' });
-
-    // Remove dependent rows in order (FK RESTRICT chains):
-    //   session_attendance → mission_arcs (via arc_participants) → missions
-    await query(`DELETE FROM session_attendance WHERE mission_id = $1`, [id]);
-    await query(`DELETE FROM arc_participants   WHERE mission_id = $1`, [id]);
-    await query(
-      `UPDATE mission_arcs SET deleted_at = NOW() WHERE mission_id = $1 AND deleted_at IS NULL`,
-      [id],
-    );
-    // mission_arcs rows are soft-deleted above; hard-delete them so the FK is cleared
-    await query(`DELETE FROM mission_arcs WHERE mission_id = $1`, [id]);
-
-    await query('DELETE FROM missions WHERE id = $1', [id]);
-
-    broadcast('MISSION_DELETED', { missionId: id });
-    return { deleted: true };
+  fastify.post('/missions/:id/join', async (req,reply) => {
+    if (!assertRateLimit(req,reply,'missions:join',{ limit:20,windowMs:60000 })) return reply;
+    const result = await joinMission(req.params.id,req.user,req.body || {});
+    return { ...result,mission:await changed(req.params.id,req.user.id) };
   });
-
-  // POST /missions/:id/join
-  fastify.post('/missions/:id/join', async (req, reply) => {
-    if (!assertRateLimit(req, reply, 'missions:join', { limit: 20, windowMs: 60_000 })) return reply;
-    const { id } = req.params;
-    const { characterId } = req.body ?? {};
-
-    const mission = await query('SELECT * FROM missions WHERE id = $1', [id]);
-    if (!mission.rows.length) return reply.code(404).send({ error: 'Mission not found' });
-
-    const m = mission.rows[0];
-    if (m.status !== 'OPEN') return reply.code(400).send({ error: 'Mission is not open' });
-    if (m.kind === 'NOTICE') return reply.code(400).send({ error: 'Cannot join a notice' });
-
-    const existing = await query(
-      'SELECT * FROM mission_participants WHERE mission_id = $1 AND user_id = $2',
-      [id, req.user.id]
-    );
-    if (existing.rows.length) return reply.code(400).send({ error: 'Already joined' });
-
-    // Validate characterId if provided: must belong to this user
-    let resolvedCharId = null;
-    if (characterId) {
-      const charRes = await query(
-        'SELECT id FROM player_characters WHERE id = $1 AND user_id = $2 AND active = TRUE',
-        [characterId, req.user.id]
-      );
-      if (!charRes.rows.length) {
-        return reply.code(400).send({ error: 'Personagem inválido ou não pertence à sua conta' });
-      }
-      resolvedCharId = charRes.rows[0].id;
-    }
-
-    const counts = await query(
-      `SELECT COUNT(CASE WHEN type = 'PLAYER' THEN 1 END) as players,
-              COUNT(CASE WHEN type = 'RESERVE' THEN 1 END) as reserves
-       FROM mission_participants WHERE mission_id = $1`,
-      [id]
-    );
-    const { players, reserves } = counts.rows[0];
-
-    let type;
-    if (parseInt(players) < m.max_players) { type = 'PLAYER'; }
-    else if (parseInt(reserves) < m.max_reserves) { type = 'RESERVE'; }
-    else return reply.code(400).send({ error: 'Queue full' });
-
-    await query(
-      `INSERT INTO mission_participants (mission_id, user_id, type, character_id)
-       VALUES ($1, $2, $3, $4)`,
-      [id, req.user.id, type, resolvedCharId]
-    );
-
-    const updated = await getMissionWithCounts(id, req.user.id);
-    broadcast('MISSION_UPDATED', updated);
-    return { joined: true, type, mission: updated };
+  fastify.delete('/missions/:id/join', async req => {
+    const result = await participantAction(req.params.id,req.user,req.user.id,'LEAVE');
+    return { ...result,mission:await changed(req.params.id,req.user.id) };
   });
-
-  // ── POST /missions/:id/close-registrations ────────────────────────────────
-  // Narrador fecha as inscrições: OPEN → CLOSED.
-  fastify.post('/missions/:id/close-registrations', async (req, reply) => {
-    const { id } = req.params;
-    const missionRes = await query('SELECT * FROM missions WHERE id = $1', [id]);
-    if (!missionRes.rows.length) return reply.code(404).send({ error: 'Mission not found' });
-    const mission = missionRes.rows[0];
-    if (mission.creator_id !== req.user.id && !isGM(req.user)) return reply.code(403).send({ error: 'Forbidden' });
-    if (mission.status !== 'OPEN') return reply.code(400).send({ error: `Status atual é ${mission.status}.` });
-    await query(`UPDATE missions SET status = 'CLOSED', updated_at = NOW() WHERE id = $1`, [id]);
-    const result = await getMissionWithCounts(id, req.user.id);
-    broadcast('MISSION_UPDATED', result);
-    return result;
+  fastify.patch('/missions/:id/participants/:userId', async req => {
+    const result = await participantAction(req.params.id,req.user,req.params.userId,req.body?.action,req.body || {});
+    return { ...result,mission:await changed(req.params.id,req.user.id) };
   });
-
-  // ── POST /missions/:id/start ───────────────────────────────────────────────
-  // Narrador inicia a campanha: OPEN|CLOSED → RUNNING.
-  // Valida código do Foundry, cria sessão, vincula handshake, tudo em um passo.
-  // Body: { code }
-  fastify.post('/missions/:id/start', async (req, reply) => {
-    if (!assertRateLimit(req, reply, 'missions:start', { limit: 10, windowMs: 60_000 })) return reply;
-    const { id } = req.params;
-
-    const missionRes = await query('SELECT * FROM missions WHERE id = $1', [id]);
-    if (!missionRes.rows.length) return reply.code(404).send({ error: 'Mission not found' });
-    const mission = missionRes.rows[0];
-    if (mission.kind === 'NOTICE') return reply.code(400).send({ error: 'Avisos não têm sessão.' });
-    if (mission.creator_id !== req.user.id && !isGM(req.user)) return reply.code(403).send({ error: 'Forbidden' });
-    if (!['OPEN', 'CLOSED'].includes(mission.status)) {
-      return reply.code(400).send({ error: `Missão está ${mission.status} — só OPEN ou CLOSED podem ser iniciadas.` });
-    }
-
-    const { code } = req.body ?? {};
-    if (!code?.trim()) return reply.code(400).send({ error: 'Código do Foundry é obrigatório.' });
-    const normalizedCode = code.trim().toUpperCase();
-
-    const hsRes = await query(`SELECT * FROM foundry_handshakes WHERE code = $1`, [normalizedCode]);
-    if (!hsRes.rows.length) return reply.code(400).send({ error: 'Código não encontrado. Verifique o painel Nimrod no Foundry.' });
-    const hs = hsRes.rows[0];
-    if (hs.claimed_at && hs.mission_id && hs.mission_id !== id) {
-      return reply.code(400).send({ error: 'Código já utilizado para outra missão.' });
-    }
-
-    // Reutiliza sessão aberta se existir
-    const existingSession = await query(
-      `SELECT sl.*, COUNT(rd.id) AS event_count FROM session_logs sl
-       LEFT JOIN resource_deltas rd ON rd.session_id = sl.id AND rd.deleted_at IS NULL
-       WHERE sl.deleted_at IS NULL AND sl.status = 'open' AND sl.mission_id = $1
-       GROUP BY sl.id ORDER BY sl.started_at DESC LIMIT 1`,
-      [id],
-    );
-
-    let session;
-    if (existingSession.rows.length) {
-      session = serializeSessionSummary(existingSession.rows[0]);
-    } else {
-      // Cria arc se não existir
-      let arcRes = await query(
-        `SELECT * FROM mission_arcs WHERE mission_id = $1 AND status = 'active' AND deleted_at IS NULL ORDER BY arc_number DESC LIMIT 1`,
-        [id],
-      );
-      if (!arcRes.rows.length) {
-        const nextNum = await query(
-          'SELECT COALESCE(MAX(arc_number), 0) + 1 AS next_num FROM mission_arcs WHERE mission_id = $1 AND deleted_at IS NULL',
-          [id],
-        );
-        arcRes = await query(
-          `INSERT INTO mission_arcs (mission_id, title, arc_number, description, primary_gm_id) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-          [id, mission.title, nextNum.rows[0].next_num, mission.description ?? null, req.user.id],
-        );
-        broadcast('ARC_CREATED', { id: arcRes.rows[0].id, missionId: id, title: arcRes.rows[0].title, arcNumber: arcRes.rows[0].arc_number, status: arcRes.rows[0].status });
-      }
-      const arc = arcRes.rows[0];
-      const sessionNumberRes = await query(
-        `SELECT COALESCE(MAX(session_number), 0) + 1 AS next_num FROM session_logs WHERE mission_id = $1 AND deleted_at IS NULL`,
-        [id],
-      );
-      const participants = await query(
-        `SELECT mp.user_id, u.role FROM mission_participants mp
-         JOIN users u ON u.id = mp.user_id
-         WHERE mp.mission_id = $1 AND mp.type = 'PLAYER' ORDER BY mp.joined_at ASC`,
-        [id],
-      );
-      const playerIds   = participants.rows.map(p => p.user_id);
-      const narratorIds = [req.user.id, ...participants.rows.filter(p => p.role === 'GM' || p.role === 'GM_PRINCIPAL').map(p => p.user_id)].filter((v,i,a) => a.indexOf(v)===i);
-      const title = req.body?.title?.trim() || `Sessão ${sessionNumberRes.rows[0].next_num} — ${mission.title}`;
-      const created = await query(
-        `INSERT INTO session_logs (title, campaign, session_number, opened_by, primary_gm_id, narrator_ids, player_ids, arc_id, mission_id)
-         VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8) RETURNING *`,
-        [title, mission.title, sessionNumberRes.rows[0].next_num, req.user.id, narratorIds, playerIds, arc.id, id],
-      );
-      session = serializeSessionSummary({ ...created.rows[0], event_count: 0 });
-      broadcast('SESSION_CREATED', session);
-    }
-
-    // Vincula handshake — sem expires_at (válido durante toda a campanha)
-    await query(
-      `UPDATE foundry_handshakes SET session_id = $1, mission_id = $2, claimed_at = COALESCE(claimed_at, NOW()), claimed_by = $3, expires_at = NULL WHERE code = $4`,
-      [session.id, id, req.user.id, normalizedCode],
-    );
-
-    // Missão → RUNNING
-    await query(`UPDATE missions SET status = 'RUNNING', updated_at = NOW() WHERE id = $1`, [id]);
-    broadcast('FOUNDRY_SESSION_LINKED', { sessionId: session.id, missionId: id, code: normalizedCode });
-    const updatedMission = await getMissionWithCounts(id, req.user.id);
-    broadcast('MISSION_UPDATED', updatedMission);
-    return reply.code(201).send({ session, mission: updatedMission });
+  for (const [path,action] of Object.entries({ start:'START',pause:'PAUSE',finish:'FINISH',cancel:'CANCEL',reopen:'REOPEN',reactivate:'REACTIVATE','close-registrations':'CLOSE_REGISTRATIONS','open-registrations':'OPEN_REGISTRATIONS' })) {
+    fastify.post(`/missions/:id/${path}`, async req => {
+      const result = await transitionMission(req.params.id,req.user,action,req.body || {});
+      const mission = await changed(req.params.id,req.user.id);
+      if (result.session) broadcast(action==='START'?'SESSION_CREATED':'SESSION_CLOSED',serializeSessionSummary(result.session));
+      if (action === 'START') return { ...result,mission };
+      return mission;
+    });
+  }
+  // Existing invite path now invites a narrator, without inserting a player or bypassing capacity.
+  fastify.post('/missions/:id/invite', async req => {
+    if(req.body?.kind!=='GM')fail(409,'O convite não inscreve jogadores automaticamente. Para convidar um narrador, informe kind: GM.');
+    await gmRequest(req.params.id,req.user,{ ...req.body,kind:'INVITE' });
+    return changed(req.params.id,req.user.id);
   });
-
-  // ── POST /missions/:id/finish ──────────────────────────────────────────────
-  // Narrador encerra a campanha: qualquer status → FINISHED.
-  // Encerra sessão ativa, invalida handshake, registra saídas de presença.
-  fastify.post('/missions/:id/finish', async (req, reply) => {
-    const { id } = req.params;
-    const missionRes = await query('SELECT * FROM missions WHERE id = $1', [id]);
-    if (!missionRes.rows.length) return reply.code(404).send({ error: 'Mission not found' });
-    const mission = missionRes.rows[0];
-    if (mission.creator_id !== req.user.id && !isGM(req.user)) return reply.code(403).send({ error: 'Forbidden' });
-    if (mission.status === 'FINISHED') return reply.code(400).send({ error: 'Missão já finalizada.' });
-
-    // Encerra sessão aberta
-    const openSession = await query(
-      `SELECT id FROM session_logs WHERE mission_id = $1 AND status = 'open' AND deleted_at IS NULL`,
-      [id],
-    );
-    if (openSession.rows.length) {
-      const sessionId = openSession.rows[0].id;
-      await query(`UPDATE session_logs SET status = 'closed', closed_at = NOW() WHERE id = $1`, [sessionId]);
-      await query(`UPDATE session_attendance SET left_at = NOW(), last_seen_at = NOW() WHERE session_id = $1 AND left_at IS NULL`, [sessionId]);
-      broadcast('SESSION_CLOSED', { sessionId, missionId: id });
-    }
-
-    // Invalida handshake (marca expires_at = now para o módulo detectar via polling)
-    await query(`UPDATE foundry_handshakes SET expires_at = NOW() WHERE mission_id = $1`, [id]);
-
-    await query(`UPDATE missions SET status = 'FINISHED', updated_at = NOW() WHERE id = $1`, [id]);
-    const updatedMission = await getMissionWithCounts(id, req.user.id);
-    broadcast('MISSION_UPDATED', updatedMission);
-    return updatedMission;
+  fastify.post('/missions/:id/gm-requests', async req => {
+    await gmRequest(req.params.id,req.user,req.body || {});
+    return changed(req.params.id,req.user.id);
   });
-
-  // DELETE /missions/:id/join
-  fastify.delete('/missions/:id/join', async (req, reply) => {
-    const { id } = req.params;
-    await query('DELETE FROM mission_participants WHERE mission_id = $1 AND user_id = $2', [id, req.user.id]);
-    const updated = await getMissionWithCounts(id, req.user.id);
-    broadcast('MISSION_UPDATED', updated);
-    return { left: true, mission: updated };
+  fastify.patch('/missions/:id/gm-requests/:requestId', async req => {
+    await resolveGmRequest(req.params.id,req.user,req.params.requestId,req.body || {});
+    return changed(req.params.id,req.user.id);
   });
-
-  // POST /missions/:id/invite
-  fastify.post('/missions/:id/invite', {
-    schema: { body: { type: 'object', required: ['userId'], properties: { userId: { type: 'string' } } } }
-  }, async (req, reply) => {
-    if (!assertRateLimit(req, reply, 'missions:invite', { limit: 30, windowMs: 60_000 })) return reply;
-    const { id } = req.params;
-    const { userId } = req.body;
-    const mission = await query('SELECT * FROM missions WHERE id = $1', [id]);
-    if (!mission.rows.length) return reply.code(404).send({ error: 'Not found' });
-    if (mission.rows[0].creator_id !== req.user.id && !isGM(req.user)) {
-      return reply.code(403).send({ error: 'Forbidden' });
-    }
-    await query(
-      `INSERT INTO mission_participants (mission_id, user_id, type, invited)
-       VALUES ($1, $2, 'PLAYER', true) ON CONFLICT (mission_id, user_id) DO NOTHING`,
-      [id, userId]
-    );
-    const updated = await getMissionWithCounts(id, req.user.id);
-    broadcast('MISSION_UPDATED', updated);
-    return updated;
-  });
+  fastify.post('/missions/:id/alerts', async req => vacancyAlert(req.params.id,req.user,true,req.body?.emailEnabled));
+  fastify.delete('/missions/:id/alerts', async req => vacancyAlert(req.params.id,req.user,false));
+  fastify.get('/missions/:id/history', async req => missionHistory(req.params.id,req.user));
 
   // POST /missions/:id/rate
   fastify.post('/missions/:id/rate', {
@@ -770,7 +523,7 @@ export async function missionRoutes(fastify) {
     }
 
     const updated = await getMissionWithCounts(id, req.user.id);
-    broadcast('MISSION_UPDATED', updated);
+    broadcast('MISSION_UPDATED', {id:updated.id});
     return { reactions: updated.reactions };
   });
 
@@ -806,7 +559,7 @@ export async function missionRoutes(fastify) {
     await query('UPDATE poll_options SET vote_count = vote_count + 1 WHERE id = $1', [optionId]);
 
     const updated = await getMissionWithCounts(id, req.user.id);
-    broadcast('MISSION_UPDATED', updated);
+    broadcast('MISSION_UPDATED', {id:updated.id});
     return { poll: updated.poll };
   });
 }

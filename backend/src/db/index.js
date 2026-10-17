@@ -16,6 +16,26 @@ export async function query(text, params) {
   return res;
 }
 
+// A transaction must keep every query on the same pooled connection.
+export async function transaction(work) {
+  const client = await pool.connect();
+  client.afterCommit = [];
+  try {
+    await client.query('BEGIN');
+    const result = await work(client);
+    await client.query('COMMIT');
+    for (const callback of client.afterCommit) {
+      try { callback(); } catch { /* Durable pending deliveries are recovered by the notifier. */ }
+    }
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function runMigrations() {
   // Create a tracking table so each file runs exactly once.
   await pool.query(`

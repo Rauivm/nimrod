@@ -2,7 +2,7 @@
   "id": "nimrod-session",
   "title": "Nimrod Session — Resource Log",
   "description": "Rastreia eventos de recursos por jogador (ouro, XP, poções, espaços de magia, itens, HP) e os envia automaticamente para o painel de sessões do Nimrod. Requer uma sessão aberta no site Nimrod.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "compatibility": {
     "minimum": "13",
     "verified": "14"

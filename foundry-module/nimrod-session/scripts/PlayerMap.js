@@ -156,7 +156,7 @@ export class PlayerMap {
 
     let nimrodUsers;
     try {
-      const res = await fetch(`${baseUrl}/api/users`, {
+      const res = await fetch(`${baseUrl}/nimrod/actor-map`, {
         headers: {
           "Content-Type": "application/json",
           //...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -166,7 +166,7 @@ export class PlayerMap {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       nimrodUsers = await res.json();
     } catch (err) {
-      console.error("nimrod-session | autoDiscover: falha ao buscar /api/users:", err.message);
+      console.error("nimrod-session | autoDiscover: falha ao buscar /nimrod/actor-map:", err.message);
       return { mapped: 0, unmapped: [] };
     }
 
@@ -180,23 +180,18 @@ export class PlayerMap {
 
       if (map[actor.id]?.nimrodId) continue;
 
-      const match = nimrodUsers.find(user =>
-          user.role === "PLAYER" &&
-          user.characters?.some(character =>
-              character.name?.toLowerCase() === actor.name?.toLowerCase()
-          )
-      );
+      const match = nimrodUsers.find(entry => entry.actorId === actor.id);
 
       if (match) {
           map[actor.id] = {
-              nimrodId: match.id,
+              nimrodId: match.userId,
               actorName: actor.name,
           };
 
           mapped++;
 
           console.log(
-              `nimrod-session | autoDiscover: ${actor.name} → ${match.id}`
+              `nimrod-session | autoDiscover: ${actor.name} → ${match.userId}`
           );
       } else {
           unmapped.push(actor.name);

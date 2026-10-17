@@ -68,7 +68,7 @@ export async function cfAuthMiddleware(request, reply) {
   // Ativo apenas quando DEV_USER_EMAIL está no .env.
   // Em produção esse bloco nunca executa (variável não existe).
   const devEmail = process.env.DEV_USER_EMAIL?.trim();
-  if (devEmail) {
+  if (IS_DEV && devEmail) {
     const devName = process.env.DEV_USER_NAME?.trim() || 'Dev User';
     const devRole = process.env.DEV_USER_ROLE?.trim() || 'GM';
     request.user = await upsertUser(devEmail, devName, devRole, true);

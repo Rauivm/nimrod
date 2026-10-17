@@ -27,6 +27,7 @@ import { registerClient } from './ws/broadcast.js';
 import { handleTavernMessage, handleTavernSocketClose } from './services/tavernRoom.js';
 import { postRoutes } from './routes/posts.js';
 import { missionRoutes } from './routes/missions.js';
+import { missionIntegrationRoutes } from './routes/missionIntegration.js';
 import { pollRoutes } from './routes/polls.js';
 import { cemeteryRoutes, cemeteryCharacterRoutes } from './routes/cemetery.js';
 import { mapRoutes } from './routes/maps.js';
@@ -45,6 +46,7 @@ import { sideQuestRoutes } from './routes/sideQuests.js';
 import { manaBridgeRoutes, manaPlayerRoutes } from './routes/mana.js';
 import { requireManaServer } from './services/manaAccess.js';
 import { startTickEngine } from './jobs/tickEngine.js';
+import { startNotifierWorker } from './services/notifier/worker.js';
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -53,7 +55,7 @@ mkdirSync(UPLOADS_DIR, { recursive: true });
 mkdirSync(join(UPLOADS_DIR, 'avatars'), { recursive: true });
 mkdirSync(join(UPLOADS_DIR, 'patch-notes'), { recursive: true });
 
-const fastify = Fastify({ logger: true });
+const fastify = Fastify({ logger: { redact: ['req.headers.authorization', 'req.headers["x-nimrod-key"]'] } });
 
 fastify.setErrorHandler((error, request, reply) => {
   fastify.log.error(
@@ -131,6 +133,9 @@ fastify.addHook('onRequest', async (req, reply) => {
   // Rotas que não precisam de autenticação
   if (
     path === '/health'              ||
+    path.startsWith('/nimrod/identity/') ||
+    path.startsWith('/nimrod/missions') ||
+    path.startsWith('/nimrod/sessions/') ||
     path === '/config'              ||
     path === '/ws'                  ||
     path.startsWith('/uploads/')    ||
@@ -163,6 +168,7 @@ fastify.addHook('onRequest', async (req, reply) => {
 await fastify.register(userRoutes);
 await fastify.register(postRoutes);
 await fastify.register(missionRoutes);
+await fastify.register(missionIntegrationRoutes);
 await fastify.register(pollRoutes);
 await fastify.register(cemeteryRoutes);
 await fastify.register(cemeteryCharacterRoutes);
@@ -181,6 +187,7 @@ await fastify.register(sideQuestRoutes);
 // ── Start ─────────────────────────────────────────────────────────────────────
 try {
   await runMigrations();
+  startNotifierWorker();
   startCemeteryDecay();
   startFoundryActorSyncJob();
   startTickEngine();

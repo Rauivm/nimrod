@@ -24,6 +24,7 @@
  */
 
 import { query } from '../db/index.js';
+import { transitionMission,linkMissionFoundrySession } from '../services/missionBoard.js';
 import { broadcast } from '../ws/broadcast.js';
 import { assertRateLimit } from '../middleware/rateLimit.js';
 import { isGM, isGMPrincipal, requireGM, requireGMPrincipal } from '../lib/roles.js';
@@ -38,6 +39,7 @@ import { resolveEventIdentity } from '../services/actorResolution.js';
 function serializeSession(row) {
   return {
     id:             row.id,
+    missionId:      row.mission_id ?? null,
     title:          row.title,
     campaign:       row.campaign       ?? null,
     sessionNumber:  row.session_number ?? null,
@@ -219,6 +221,8 @@ export async function sessionRoutes(fastify) {
   //   403 não é narrador desta sessão
   //   404 sessão ou código não encontrado
   fastify.post('/sessions/:id/link-foundry', async (req, reply) => {
+    const linked=await linkMissionFoundrySession(req.params.id,req.user,req.body?.code);
+    if(linked) {broadcast('FOUNDRY_SESSION_LINKED',linked);return linked;}
     if (!requireGM(req, reply)) return reply;
 
     if (!isValidUuid(req.params.id)) {
@@ -268,7 +272,7 @@ export async function sessionRoutes(fastify) {
 
     const hs = hsRes.rows[0];
 
-    if (new Date(hs.expires_at) < new Date()) {
+    if (hs.expires_at && new Date(hs.expires_at) < new Date()) {
       return reply.code(400).send({ error: 'Código expirado. O módulo Foundry gera um novo código automaticamente ao inicializar.' });
     }
 
@@ -302,11 +306,11 @@ export async function sessionRoutes(fastify) {
       sessionId: sl.id,
       worldId:   hs.world_id,
       gmName:    hs.gm_name,
-      code:      normalizedCode,
+
     });
 
     req.log.info(
-      { sessionId: sl.id, code: normalizedCode, worldId: hs.world_id, userId: req.user.id },
+      { sessionId: sl.id, worldId: hs.world_id, userId: req.user.id },
       'foundry session linked',
     );
 
@@ -528,9 +532,15 @@ export async function sessionRoutes(fastify) {
   // ── POST /sessions/:id/close ───────────────────────────────────────────────
   // Fecha a sessão e gera o snapshot consolidado de recursos. Apenas GM_PRINCIPAL.
   fastify.post('/sessions/:id/close', async (req, reply) => {
-    if (!requireGMPrincipal(req, reply)) return reply;
-
     const session = await fetchSession(req.params.id);
+    if (session?.mission_id) {
+      await transitionMission(session.mission_id,req.user,'PAUSE',req.body || {});
+      const closed = await fetchSession(session.id);
+      broadcast('SESSION_CLOSED',{id:closed.id,missionId:closed.mission_id,status:closed.status,closedAt:closed.closed_at});
+      broadcast('MISSION_UPDATED',{id:session.mission_id});
+      return serializeSession(closed);
+    }
+    if (!requireGMPrincipal(req, reply)) return reply;
     if (!session) return reply.code(404).send({ error: 'Sessão não encontrada.' });
     if (session.status !== 'open') {
       return reply.code(400).send({ error: `Sessão já está com status "${session.status}".` });

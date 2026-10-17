@@ -1,3 +1,4 @@
+import { recordConnection } from '../services/missionAttendance.js';
 import { query } from '../db/index.js';
 import { signFoundryToken, verifyFoundryToken } from '../services/foundryAuth.js';
 import { resolveFoundryMapping } from '../services/foundryMap.js';
@@ -136,7 +137,7 @@ export async function foundryRoutes(fastify) {
     let sessionContext = {};
     if (activeSessionId) {
       const sessionRes = await query(
-        `SELECT sl.id, sl.status, sl.mission_id, m.creator_id
+        `SELECT sl.id, sl.status, sl.mission_id, m.creator_id, m.gm_id
          FROM session_logs sl
          LEFT JOIN missions m ON m.id = sl.mission_id
          WHERE sl.id = $1 AND sl.deleted_at IS NULL`,
@@ -157,13 +158,13 @@ export async function foundryRoutes(fastify) {
       const participantRes = await query(
         `SELECT character_id
          FROM mission_participants
-         WHERE mission_id = $1 AND user_id = $2
+         WHERE mission_id = $1 AND user_id = $2 AND type='PLAYER' AND approval_status='APPROVED'
          LIMIT 1`,
         [session.mission_id, req.user.id],
       );
       const isMissionAuthor = session.creator_id === req.user.id;
       const participant = participantRes.rows[0] ?? null;
-      if (!isMissionAuthor && !participant) {
+      if (!isMissionAuthor && session.gm_id !== req.user.id && !participant) {
         return reply.code(403).send({ error: 'Only mission participants can enter this session.' });
       }
 
@@ -188,6 +189,7 @@ export async function foundryRoutes(fastify) {
       actorName: mapping.actor_name,
       actor:     mapping.actor_name,
       ...sessionContext,
+      exp:Math.floor(Date.now()/1000)+300,
     }, secret);
 
     return { url: buildFoundryLaunchUrl(foundryBaseUrl, token) };
@@ -227,51 +229,9 @@ export async function foundryRoutes(fastify) {
     const sessionId = payload.sessionId || payload.activeSessionId;
     const missionId = payload.missionId ?? null;
     const userId = payload.userId ?? null;
-    const characterId = req.body?.characterId || payload.characterId || null;
-    const actorName = req.body?.actorName || payload.actor || payload.actorName || payload.a || null;
-
-    if (!sessionId || !missionId || !userId) {
-      return reply.code(400).send({ error: 'token does not contain session context' });
-    }
-
-    const session = await query(
-      `SELECT id, status FROM session_logs WHERE id = $1 AND deleted_at IS NULL`,
-      [sessionId],
-    );
-    if (!session.rows.length) return reply.code(404).send({ error: 'Session not found.' });
-
-    if (!leaving && session.rows[0].status !== 'open') {
-      return reply.code(400).send({ error: 'Session is not open.' });
-    }
-
-    if (leaving) {
-      const res = await query(
-        `UPDATE session_attendance
-         SET left_at = COALESCE(left_at, NOW()),
-             actor_name = COALESCE($4, actor_name)
-         WHERE session_id = $1
-           AND mission_id = $2
-           AND user_id = $3
-           AND left_at IS NULL
-         RETURNING *`,
-        [sessionId, missionId, userId, actorName],
-      );
-      return { ok: true, attendance: res.rows[0] ?? null };
-    }
-
-    const res = await query(
-      `INSERT INTO session_attendance
-         (session_id, mission_id, user_id, character_id, actor_name, entered_at, last_seen_at)
-       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-       ON CONFLICT (session_id, user_id) DO UPDATE SET
-         character_id = COALESCE(EXCLUDED.character_id, session_attendance.character_id),
-         actor_name = COALESCE(EXCLUDED.actor_name, session_attendance.actor_name),
-         last_seen_at = NOW(),
-         left_at = NULL
-       RETURNING *`,
-      [sessionId, missionId, userId, characterId, actorName],
-    );
-    return { ok: true, attendance: res.rows[0] };
+    if (!sessionId || !missionId || !userId) return reply.code(400).send({ error:'Token sem contexto de sessão.' });
+    const result = await recordConnection(sessionId,{ userId,eventType:leaving?'leave':'enter' });
+    return { ok:true,...result };
   }
 
   fastify.post('/nimrod/session/enter', async (req, reply) => registerSessionPresence(req, reply, false));
@@ -330,7 +290,7 @@ export async function foundryRoutes(fastify) {
        JSON.stringify(players), JSON.stringify(tokens), expiresAt.toISOString()],
     );
 
-    req.log.info({ code, worldId }, 'foundry handshake created');
+    req.log.info({ worldId }, 'foundry handshake created');
     return reply.code(201).send({ code, expiresAt: expiresAt.toISOString() });
   });
 
@@ -399,109 +359,9 @@ export async function foundryRoutes(fastify) {
   fastify.post('/nimrod/session/presence', async (req, reply) => {
     if (!(await isFoundryRequest(req))) return reply.code(401).send({ error: 'Invalid API key.' });
 
-    const {
-      sessionId,
-      eventType,
-      foundryUserId,
-      foundryName,
-      characterName = null,
-      actorId       = null,
-      hp            = null,
-      occurredAt    = null,
-    } = req.body ?? {};
-
-    if (!sessionId || !eventType || !foundryUserId) {
-      return reply.code(400).send({ error: 'sessionId, eventType e foundryUserId são obrigatórios.' });
-    }
-
-    // Valida sessão
-    const slRes = await query(
-      `SELECT id, status, mission_id FROM session_logs WHERE id = $1 AND deleted_at IS NULL`,
-      [sessionId],
-    );
-    if (!slRes.rows.length) return reply.code(404).send({ error: 'Sessão não encontrada.' });
-    if (slRes.rows[0].status !== 'open') return reply.code(400).send({ error: 'Sessão não está aberta.' });
-
-    const { mission_id: missionId } = slRes.rows[0];
-    const ts = occurredAt ? new Date(occurredAt) : new Date();
-
-    // ── Resolução de user_id ────────────────────────────────────────────────
-    let userId      = null;
-    let characterId = null;
-
-    // 1. Resolução compartilhada — mesma função usada por /sessions/:id/events
-    const identity = await resolveEventIdentity({ actorId, actorName: characterName ?? foundryName });
-    if (identity) {
-      userId      = identity.playerId;
-      characterId = identity.characterId;
-    }
-
-    // 2. Fallback específico de presença: user_foundry_map (email → role/actor)
-    if (!userId) {
-      const lookupName = characterName ?? foundryName;
-      const fmRes = await query(
-        `SELECT u.id AS user_id
-         FROM user_foundry_map fm
-         JOIN users u ON u.email = fm.email
-         WHERE LOWER(fm.actor_name) = LOWER($1)
-         LIMIT 1`,
-        [lookupName],
-      );
-      if (fmRes.rows.length) userId = fmRes.rows[0].user_id;
-    }
-
-    // 3. Fallback: users.name ou display_name = foundryName
-    if (!userId && foundryName) {
-      const uRes = await query(
-        `SELECT id FROM users
-         WHERE LOWER(COALESCE(display_name, name)) = LOWER($1)
-         LIMIT 1`,
-        [foundryName],
-      );
-      if (uRes.rows.length) userId = uRes.rows[0].id;
-    }
-
-    // Se não conseguiu resolver, apenas emite WS sem gravar no banco
-    if (!userId) {
-      req.log.warn(
-        { foundryUserId, foundryName, characterName, actorId },
-        'presence: não foi possível resolver user_id — evento WS emitido sem persistência',
-      );
-      broadcast('SESSION_PRESENCE', {
-        sessionId, eventType, foundryName, characterName,
-        occurredAt: ts.toISOString(), persisted: false,
-      });
-      return { ok: true, persisted: false, reason: 'user_id não resolvido' };
-    }
-
-    // ── Grava em session_attendance ─────────────────────────────────────────
-    if (eventType === 'enter' || eventType === 'reconnect') {
-      await query(
-        `INSERT INTO session_attendance
-           (session_id, mission_id, user_id, character_id, actor_name, entered_at, last_seen_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $6)
-         ON CONFLICT (session_id, user_id) DO UPDATE SET
-           character_id  = COALESCE(EXCLUDED.character_id, session_attendance.character_id),
-           actor_name    = COALESCE(EXCLUDED.actor_name,   session_attendance.actor_name),
-           last_seen_at  = EXCLUDED.last_seen_at,
-           left_at       = NULL     -- reconectou: limpa saída anterior`,
-        [sessionId, missionId, userId, characterId, characterName ?? foundryName, ts],
-      );
-    } else if (eventType === 'leave') {
-      await query(
-        `UPDATE session_attendance
-         SET left_at = $1, last_seen_at = $1
-         WHERE session_id = $2 AND user_id = $3 AND left_at IS NULL`,
-        [ts, sessionId, userId],
-      );
-    }
-
-    broadcast('SESSION_PRESENCE', {
-      sessionId, eventType, foundryName, characterName,
-      occurredAt: ts.toISOString(), persisted: true, userId,
-    });
-
-    return { ok: true, persisted: true, userId, characterId };
+    const { sessionId,eventType,actorId } = req.body || {};
+    // Actor ID must already belong to a synchronized Nimrod account. Names are labels only.
+    return { ok:true,...await recordConnection(sessionId,{ actorId,eventType }) };
   });
 
   // ── GET /nimrod/calendar/status ─────────────────────────────────────────────

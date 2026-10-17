@@ -37,8 +37,11 @@ export function shiftNotification() {
 
 export function retryNotification(job, delayMs = 1000) {
   if (!job || queue.length >= MAX_QUEUE_SIZE) return;
-  queue.push(job);
-  setTimeout(scheduleNotifierDrain, delayMs).unref?.();
+  setTimeout(() => {
+    if (queue.length >= MAX_QUEUE_SIZE) return;
+    queue.push(job);
+    scheduleNotifierDrain();
+  }, delayMs).unref?.();
 }
 
 export function notifierQueueSize() {

@@ -41,7 +41,7 @@ import { assertRateLimit } from '../middleware/rateLimit.js';
 import { isGMPrincipal, requireGM } from '../lib/roles.js';
 import { isFoundryRequest } from '../lib/foundryAuth.js';
 import { isValidUuid } from '../lib/validation.js';
-import { resolveEventIdentity } from '../services/actorResolution.js';
+import { resolveEventIdentity, resolveActorOwnership } from '../services/actorResolution.js';
 
 function serializeSessionEvent(row) {
   return {
@@ -189,7 +189,8 @@ export async function sessionEventRoutes(fastify) {
     let resolvedActorName   = actorName   ?? null;
     let resolvedIdentity    = null;
 
-    if (actorId || foundryName || resolvedPlayerId || resolvedCharacterId) {
+    const isFoundryConnection = isFoundryOrigin && ATTENDANCE_PROJECTED_TYPES.has(eventType.trim());
+    if (!isFoundryConnection && (actorId || foundryName || resolvedPlayerId || resolvedCharacterId)) {
       resolvedIdentity = await resolveEventIdentity({
         playerId: resolvedPlayerId,
         actorId,
@@ -213,7 +214,21 @@ export async function sessionEventRoutes(fastify) {
       return reply.code(400).send({ error: `characterId inválido: "${resolvedCharacterId}".` });
     }
 
-    const basePayload = payload ?? {};
+    if (isFoundryConnection) {
+      const stable = actorId ? await resolveActorOwnership(actorId) : null;
+      resolvedPlayerId = stable?.userId || null;
+      resolvedCharacterId = stable?.characterId || null;
+      resolvedIdentity = stable ? {playerId:stable.userId,characterId:stable.characterId,actorName:stable.actorName} : null;
+      if (resolvedPlayerId && !(await query("SELECT 1 FROM mission_participants WHERE mission_id=$1 AND user_id=$2 AND type='PLAYER' AND approval_status='APPROVED'",[sl.mission_id,resolvedPlayerId])).rows.length) {
+        resolvedPlayerId=null; resolvedCharacterId=null; resolvedIdentity=null;
+      }
+    }
+
+    const basePayload = {...(payload ?? {})};
+    if(isFoundryConnection) {
+      // Labels and client-provided Nimrod IDs are never an identity proof.
+      for(const field of ['user_id','user_name','display_name','character_id','character_name','is_gm'])delete basePayload[field];
+    }
     const enrichedPayload = eventType.trim() === PLAYER_HANDLERS_EVENT_TYPES.HEARTBEAT
       ? {
           ...basePayload,
