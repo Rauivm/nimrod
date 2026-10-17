@@ -1,3 +1,4 @@
+import { Modal } from './ui.jsx';
 import { useState } from 'react';
 import { X, Check } from 'lucide-react';
 import { api } from '../lib/api.js';
@@ -37,22 +38,21 @@ export default function EditDisplayNameModal({ onClose }) {
 
   const handleKey = (e) => {
     if (e.key === 'Enter') save();
-    if (e.key === 'Escape') onClose();
+    if (e.key === 'Escape' && !loading) onClose();
   };
 
   return (
-    <div className="ednm-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+    <Modal title="Editar nome de exibição" showHeader={false} onClose={onClose} dismissible={!loading}>
       <div className="ednm-modal animate-in">
         <div className="ednm-header">
           <span className="ednm-title">Editar Nome</span>
-          <button onClick={onClose} className="ednm-close"><X size={16} /></button>
+          <button onClick={onClose} className="ednm-close" aria-label="Fechar edição do nome"><X size={16} /></button>
         </div>
 
         <div className="ednm-body">
-          <label className="ednm-label">Nome de exibição</label>
+          <label className="ednm-label" htmlFor="display-name">Nome de exibição</label>
           <input
-            autoFocus
-            value={value}
+            id="display-name" value={value}
             onChange={e => setValue(e.target.value)}
             onKeyDown={handleKey}
             maxLength={40}
@@ -60,7 +60,7 @@ export default function EditDisplayNameModal({ onClose }) {
             className="ednm-input"
           />
           <span className="ednm-counter">{value.length}/40</span>
-          {error && <p className="ednm-error">{error}</p>}
+          {error && <p className="ednm-error" role="alert">{error}</p>}
         </div>
 
         <div className="ednm-footer">
@@ -137,6 +137,6 @@ export default function EditDisplayNameModal({ onClose }) {
         .ednm-btn-save:hover:not(:disabled) { background: var(--crimson-bright); }
         .ednm-btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
       `}</style>
-    </div>
+    </Modal>
   );
 }

@@ -1,3 +1,4 @@
+import { Modal } from './ui.jsx';
 import { Shield } from 'lucide-react';
 
 /**
@@ -9,7 +10,7 @@ import { Shield } from 'lucide-react';
  */
 export default function LgpdConsentModal({ onClose }) {
   return (
-    <div className="lgpd-overlay">
+    <Modal title="Privacidade de dados" showHeader={false} onClose={onClose} dismissible={true}>
       <div className="lgpd-modal animate-in">
         <div className="lgpd-icon">
           <Shield size={32} strokeWidth={1.5} />
@@ -93,6 +94,6 @@ export default function LgpdConsentModal({ onClose }) {
         }
         .lgpd-accept-btn:active { transform: translateY(0); }
       `}</style>
-    </div>
+    </Modal>
   );
 }

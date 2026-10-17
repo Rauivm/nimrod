@@ -1,15 +1,17 @@
+import { Modal } from '../components/ui.jsx';
+import { PageHeader, Button, StatePanel } from '../components/ui.jsx';
 import {
   memo, useState, useEffect, useCallback, useRef, useMemo,
 } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { useAuth, isGM, isGMPrincipal, roleLabel } from '../contexts/AuthContext.jsx';
+import { useAuth, isGM } from '../contexts/AuthContext.jsx';
 import { Flower, Plus, Trash2, X, Skull, Archive, Star, Trophy, Upload } from 'lucide-react';
 
 // ── Tribute tier ──────────────────────────────────────────────────────────────
 function getTributeTier(count) {
   if (count <= 0) return { icon: '🪦', label: 'Esquecido',   color: 'var(--text-faint)' };
-  if (count < 5)  return { icon: '🌹', label: `${count} Rosa${count > 1 ? 's' : ''}`, color: '#c06060' };
+  if (count < 5)  return { icon: '🌹', label: `${count} Rosa${count > 1 ? 's' : ''}`, color: '#e99b9f' };
   if (count < 10) return { icon: '💐', label: 'Buquê',       color: '#d08080' };
   if (count < 20) return { icon: '👑', label: 'Honrado',     color: 'var(--gold)' };
   if (count < 40) return { icon: '👑👑', label: 'Lendário', color: '#f0d070' };
@@ -18,7 +20,7 @@ function getTributeTier(count) {
 
 // ── Animação de flores ao prestar respeito ────────────────────────────────────
 const TRIBUTE_PARTICLES = {
-  rose:   { emoji: '🌹', color: '#c06060' },
+  rose:   { emoji: '🌹', color: '#e99b9f' },
   bouquet:{ emoji: '💐', color: '#d08080' },
   crown:  { emoji: '👑', color: '#f0d070' },
   candle: { emoji: '🕯️', color: '#f0c060' },
@@ -128,7 +130,7 @@ function TokenImg({ src, fallback, name, size = 60, dead }) {
       }
       {dead && (
         <div className="gravestone-skull-overlay">
-          <Skull size={size * 0.28} style={{ color: '#c06060', opacity: 0.85 }} />
+          <Skull size={size * 0.28} style={{ color: '#e99b9f', opacity: 0.85 }} />
         </div>
       )}
     </div>
@@ -420,7 +422,7 @@ function CreateCharModal({ onClose, onCreated }) {
   };
 
   return (
-    <div className="modal-overlay" role="presentation">
+    <Modal title="Adicionar memorial" showHeader={false} onClose={onClose} dismissible={!loading}>
       <div className="modal animate-in">
         <div className="modal-header">
           <h2>🪦 Adicionar ao Cemitério</h2>
@@ -428,23 +430,23 @@ function CreateCharModal({ onClose, onCreated }) {
         </div>
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div className="form-group">
-            <label>Nome do Personagem *</label>
+            <label>Nome do Personagem *
             <input
               value={form.name}
               onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
               required placeholder="Ex: Thorin Pedraescura"
-            />
+            /></label>
           </div>
           <div className="form-group">
-            <label>Epitáfio / Causa da morte</label>
+            <label>Epitáfio / Causa da morte
             <textarea
               value={form.description}
               onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
               placeholder="Como o herói caiu..." rows={3}
-            />
+            /></label>
           </div>
           <div className="form-group">
-            <label>Imagem (opcional)</label>
+            <p className="ui-form-help">Imagem (opcional)</p>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <button type="button" className="img-upload-btn" onClick={() => fileRef.current?.click()}>
                 <Upload size={12} /> {imgFile ? imgFile.name : 'Escolher imagem'}
@@ -473,7 +475,7 @@ function CreateCharModal({ onClose, onCreated }) {
         .submit-btn:hover:not(:disabled) { background: var(--crimson-bright); }
         .submit-btn:disabled { opacity: 0.5; }
       `}</style>
-    </div>
+    </Modal>
   );
 }
 
@@ -489,21 +491,25 @@ export default function CemeteryPage() {
   const [hasMore, setHasMore]           = useState(false);
   const [showCreate, setShowCreate]     = useState(false);
   const [tab, setTab]                   = useState('all');
+  const [legacyError, setLegacyError] = useState('');
+  const [foundryError, setFoundryError] = useState('');
 
   useEffect(() => { legacyRef.current = legacy; }, [legacy]);
 
   const loadLegacy = useCallback(async ({ append = false } = {}) => {
     append ? setLoadingMore(true) : setLoading(true);
     const offset = append ? legacyRef.current.length : 0;
-    const data   = await api.get(`/cemetery?limit=${PAGE_SIZE}&offset=${offset}`).catch(() => []);
+    let data;
+    try { data = await api.get(`/cemetery?limit=${PAGE_SIZE}&offset=${offset}`); setLegacyError(''); }
+    catch (e) { setLegacyError(e.message); setLoading(false); setLoadingMore(false); return; }
     setHasMore(data.length === PAGE_SIZE);
     setLegacy(prev => append ? [...prev, ...data.filter(c => !prev.some(e => e.id === c.id))] : data);
     append ? setLoadingMore(false) : setLoading(false);
   }, []);
 
   const loadFoundryChars = useCallback(async () => {
-    const data = await api.get('/cemetery/characters').catch(() => []);
-    setFoundryChars(data);
+    try { setFoundryChars(await api.get('/cemetery/characters')); setFoundryError(''); }
+    catch (e) { setFoundryError(e.message); }
   }, []);
 
   const load = useCallback(async (opts) => {
@@ -556,15 +562,8 @@ export default function CemeteryPage() {
       <div className="cem-page">
 
         {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="cem-page-header">
-          <div>
-            <h1 className="cem-page-title">🪦 Cemitério</h1>
-            <p className="cem-page-sub">Em memória dos heróis caídos</p>
-          </div>
-          <button onClick={() => setShowCreate(true)} className="create-btn">
-            <Plus size={13} /> Adicionar
-          </button>
-        </div>
+        <PageHeader eyebrow="As histórias permanecem" title="Cemitério" description="Honre os heróis caídos e celebre o legado de quem já viveu grandes aventuras." action={<Button onClick={() => setShowCreate(true)}><Plus size={16} /> Adicionar memorial</Button>} />
+        {(legacyError || foundryError) && <StatePanel kind="error" title="Alguns memoriais não puderam ser carregados" action={<Button onClick={() => load()}>Tentar novamente</Button>}>{[legacyError, foundryError].filter(Boolean).join(' · ')}</StatePanel>}
 
         {/* ── Hall da Fama ─────────────────────────────────────────────────── */}
         {topLegendary.length > 0 && (
@@ -601,7 +600,7 @@ export default function CemeteryPage() {
 
         {/* ── Legenda ──────────────────────────────────────────────────────── */}
         <div className="tribute-legend">
-          <span style={{ color: '#c06060' }}>🌹 1–4 Rosa</span>
+          <span style={{ color: '#e99b9f' }}>🌹 1–4 Rosa</span>
           <span style={{ color: '#d08080' }}>💐 5–9 Buquê</span>
           <span style={{ color: 'var(--gold)' }}>👑 10–19 Honrado</span>
           <span style={{ color: '#f0d070' }}>👑👑 20–39 Lendário</span>
@@ -619,7 +618,7 @@ export default function CemeteryPage() {
             { id: 'legacy',  label: `Manual (${legacy.length})` },
           ].map(t => (
             <button
-              key={t.id}
+              key={t.id} aria-pressed={tab === t.id}
               className={`cem-tab ${tab === t.id ? 'cem-tab-active' : ''}`}
               onClick={() => setTab(t.id)}
             >
@@ -632,7 +631,7 @@ export default function CemeteryPage() {
         <div className="cem-list">
           {loading ? (
             [1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 100, borderRadius: 'var(--radius-lg)' }} />)
-          ) : (allChars.length === 0 && tab === 'all') ? (
+          ) : (!legacyError && !foundryError && allChars.length === 0 && tab === 'all') ? (
             <div className="cem-empty">🕊️ Nenhum herói aqui... por enquanto.</div>
           ) : (
             <>

@@ -1,18 +1,20 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useEffect, useState, useCallback } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 
 import Layout from './components/Layout.jsx';
+import BrandSeal from './components/BrandSeal.jsx';
 
-import ExperienceEntryPage from './pages/ExperienceEntryPage.jsx';
-import MissionsPage from './pages/MissionsPage.jsx';
-import CemeteryPage from './pages/CemeteryPage.jsx';
-import MapsPage from './pages/MapsPage.jsx';
-import ProfilePage from './pages/ProfilePage.jsx';
-import PatchNotesPage from './pages/PatchNotesPage.jsx';
-import SessionsPage from './pages/SessionsPage.jsx';
-import CalendarPage from './pages/CalendarPage.jsx';
-import SideQuestsPage from './pages/SideQuestsPage.jsx';
-import LobbyPage from './pages/LobbyPage.jsx';
+const ExperienceEntryPage = lazy(() => import('./pages/ExperienceEntryPage.jsx'));
+const MissionsPage = lazy(() => import('./pages/MissionsPage.jsx'));
+const FoundryConnectPage = lazy(() => import('./pages/FoundryConnectPage.jsx'));
+const CemeteryPage = lazy(() => import('./pages/CemeteryPage.jsx'));
+const MapsPage = lazy(() => import('./pages/MapsPage.jsx'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
+const PatchNotesPage = lazy(() => import('./pages/PatchNotesPage.jsx'));
+const SessionsPage = lazy(() => import('./pages/SessionsPage.jsx'));
+const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
+const SideQuestsPage = lazy(() => import('./pages/SideQuestsPage.jsx'));
+const LobbyPage = lazy(() => import('./pages/LobbyPage.jsx'));
 
 import SplashScreen from './components/SplashScreen.jsx';
 import LgpdConsentModal from './components/LgpdConsentModal.jsx';
@@ -22,33 +24,7 @@ import { useAuth } from './contexts/AuthContext.jsx';
 import { useWs } from './contexts/WsContext.jsx';
 
 function LoadingScreen() {
-  return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100vh',
-      flexDirection: 'column',
-      gap: '16px',
-    }}>
-      <div style={{
-        fontFamily: 'var(--font-display)',
-        fontSize: '24px',
-        color: 'var(--gold)',
-        letterSpacing: '4px',
-      }}>
-        NIMROD
-      </div>
-
-      <div style={{
-        color: 'var(--text-muted)',
-        fontSize: '13px',
-        animation: 'pulse 1.5s infinite',
-      }}>
-        Carregando aventura...
-      </div>
-    </div>
-  );
+  return <div className="app-loading" role="status"><BrandSeal /><strong>NIMROD</strong><span>Preparando sua próxima aventura…</span></div>;
 }
 
 /** Syncs ROLE_UPDATED WS events → AuthContext refresh without page reload. */
@@ -152,6 +128,7 @@ function PollNotificationBanner() {
         Ver
       </a>
       <button
+        aria-label="Dispensar aviso de enquete"
         onClick={() => setBanner(null)}
         style={{ background: 'none', border: 'none', color: '#666', fontSize: '16px', cursor: 'pointer', flexShrink: 0, lineHeight: 1, padding: '2px' }}
       >
@@ -223,10 +200,11 @@ export default function App() {
 
       {/* Routes */}
       {!loading && splashDone && (
-        <Routes>
+        <Suspense fallback={<LoadingScreen />}><Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<ExperienceEntryPage />} />
             <Route path="lobby" element={<LobbyPage />} />
+            <Route path="foundry-connect" element={<FoundryConnectPage />} />
 
             <Route
               path="missions"
@@ -268,9 +246,9 @@ export default function App() {
               element={<PatchNotesPage />}
             />
             <Route path="gm/sessions" element={<SessionsPage />} />
+            <Route path="calendar" element={<CalendarPage />} />
           </Route>
-          <Route path="calendar" element={<CalendarPage />} />
-        </Routes>
+        </Routes></Suspense>
       )}
     </>
   );

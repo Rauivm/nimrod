@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { ChevronDown, ChevronUp, Archive, Edit2, Check, X } from 'lucide-react';
 
@@ -52,6 +52,8 @@ function TokenImg({ src, name, size = 64 }) {
 // ── Inline biography editor ───────────────────────────────────────────────────
 function BiographyEditor({ charId, userId, initial, onSaved }) {
   const [editing, setEditing] = useState(false);
+  const inputRef = useRef(null);
+  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
   const [value, setValue]     = useState(initial ?? '');
   const [loading, setLoading] = useState(false);
 
@@ -88,8 +90,8 @@ function BiographyEditor({ charId, userId, initial, onSaved }) {
 
   return (
     <div className="bio-editor">
-      <textarea
-        autoFocus value={value}
+      <textarea ref={inputRef} aria-label="Biografia do personagem"
+        value={value}
         onChange={e => setValue(e.target.value)}
         rows={4} maxLength={2000}
         style={{ fontSize: '13px', resize: 'vertical' }}

@@ -1,9 +1,10 @@
+import { useToast } from './ui.jsx';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Heart, Trash2, MessageSquare, CornerDownRight, ChevronDown, ChevronUp } from 'lucide-react';
-import { memo, useEffect, useState, useCallback } from 'react';
+import { memo, useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '../lib/api.js';
-import { useAuth, isGM, isGMPrincipal, roleLabel } from '../contexts/AuthContext.jsx';
+import { useAuth, isGM } from '../contexts/AuthContext.jsx';
 
 const MAX_VISIBLE_DEPTH = 3;
 
@@ -95,6 +96,7 @@ function AuthorChip({ author }) {
 }
 
 export const PostCard = memo(function PostCard({ post: initialPost, onUpdate, depth = 0 }) {
+  const notify = useToast();
   const { user } = useAuth();
   const [localPost, setLocalPost]           = useState(initialPost);
   const [liking, setLiking]                 = useState(false);
@@ -131,7 +133,7 @@ export const PostCard = memo(function PostCard({ post: initialPost, onUpdate, de
     } catch (e) {
       // Reverte em caso de erro (recarrega o pai)
       onUpdate?.();
-      alert(e.message);
+      notify(e.message, 'error');
     }
   };
 
@@ -193,7 +195,7 @@ export const PostCard = memo(function PostCard({ post: initialPost, onUpdate, de
           )}
 
           {isOwn && (
-            <button onClick={del} className="delete-btn"><Trash2 size={12} /></button>
+            <button onClick={del} className="delete-btn" aria-label="Excluir publicação"><Trash2 size={12} /></button>
           )}
         </div>
 
@@ -282,6 +284,9 @@ export const PostCard = memo(function PostCard({ post: initialPost, onUpdate, de
 // Respostas também podem ter personagem associado.
 // Carrega os personagens do usuário ao montar e permite selecionar.
 function ReplyComposer({ parentId, onSubmit, onCancel }) {
+  const notify = useToast();
+  const inputRef = useRef(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
   const { user } = useAuth();
   const [content, setContent]         = useState('');
   const [loading, setLoading]         = useState(false);
@@ -301,7 +306,7 @@ function ReplyComposer({ parentId, onSubmit, onCancel }) {
   }, [user?.id]);
 
   const submit = async () => {
-    if (!content.trim()) return;
+    if (loading || !content.trim()) return;
     const nextContent = content.trim();
     const tempId      = `temp-reply-${Date.now()}`;
 
@@ -340,7 +345,7 @@ function ReplyComposer({ parentId, onSubmit, onCancel }) {
     } catch (e) {
       onSubmit?.(null, tempId, true);
       setContent(nextContent);
-      alert(e.message);
+      notify(e.message, 'error');
     }
     setLoading(false);
   };
@@ -372,7 +377,7 @@ function ReplyComposer({ parentId, onSubmit, onCancel }) {
         )}
 
         <textarea
-          autoFocus value={content}
+          ref={inputRef} aria-label="Escrever uma resposta" value={content}
           onChange={e => setContent(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(); }}
           placeholder="Responder..." maxLength={500} rows={2}
@@ -395,6 +400,7 @@ function ReplyComposer({ parentId, onSubmit, onCancel }) {
 // ── PostComposer ──────────────────────────────────────────────────────────────
 // Agora carrega os personagens do usuário e exibe um seletor acima do textarea.
 export function PostComposer({ onPost }) {
+  const notify = useToast();
   const { user } = useAuth();
   const [content, setContent]         = useState('');
   const [loading, setLoading]         = useState(false);
@@ -458,7 +464,7 @@ export function PostComposer({ onPost }) {
     } catch (e) {
       onPost?.(null, tempId, true);
       setContent(nextContent);
-      alert(e.message);
+      notify(e.message, 'error');
     }
     setLoading(false);
   };
@@ -472,7 +478,7 @@ export function PostComposer({ onPost }) {
           <select
             value={characterId}
             onChange={e => setCharacterId(e.target.value)}
-            className="composer-char-select"
+            className="composer-char-select" aria-label="Publicar como jogador ou personagem"
           >
             <option value="">— Jogador (sem personagem) —</option>
             {characters.map(c => (
@@ -485,6 +491,7 @@ export function PostComposer({ onPost }) {
       )}
 
       <textarea
+        aria-label="Escrever uma publicação"
         value={content}
         onChange={e => setContent(e.target.value)}
         placeholder={
@@ -502,7 +509,7 @@ export function PostComposer({ onPost }) {
           {content.length}/500
         </span>
         <button onClick={submit} disabled={loading || !content.trim()} className="post-btn">
-          Postar
+          {loading ? 'Publicando…' : 'Publicar'}
         </button>
       </div>
 

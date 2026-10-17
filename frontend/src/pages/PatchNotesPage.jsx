@@ -1,10 +1,12 @@
+import { Modal } from '../components/ui.jsx';
+import { PageHeader, Button, StatePanel } from '../components/ui.jsx';
 /**
  * PatchNotesPage.jsx
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
-import { useAuth, isGM, isGMPrincipal, roleLabel } from '../contexts/AuthContext.jsx';
+import { useAuth, isGM } from '../contexts/AuthContext.jsx';
 import {
   Plus, ExternalLink, FileText, BookOpen,
   Trash2, Eye, EyeOff, X, Upload, Link as LinkIcon,
@@ -125,7 +127,6 @@ function getEntryIconPath(sectionTitle, entryName = '') {
 function EntryIcon({ sectionTitle, entryName }) {
   const [failed, setFailed] = useState(false);
   const path = getEntryIconPath(sectionTitle, entryName);
-  const initial = (entryName?.[0] ?? '?').toUpperCase();
   const sectionDef = getSectionDef(sectionTitle);
 
   const fallback =
@@ -651,7 +652,7 @@ function PatchNoteForm({ onClose, onCreate }) {
   );
 
   return (
-    <div className="pnf-overlay" role="presentation">
+    <Modal title="Criar atualização de regras" showHeader={false} onClose={onClose} dismissible={true}>
       <div className="pnf-modal animate-in">
 
         <div className="pnf-header">
@@ -664,21 +665,21 @@ function PatchNoteForm({ onClose, onCreate }) {
           {/* ── Metadados básicos ── */}
           <div className="pnf-row-2">
             <div className="pnf-field">
-              <label>Título *</label>
+              <label>Título *
               <input value={title} onChange={e => setTitle(e.target.value)}
-                placeholder="ex: Balanceamento das Classes" maxLength={120} />
+                placeholder="ex: Balanceamento das Classes" maxLength={120} /></label>
             </div>
             <div className="pnf-field">
-              <label>Versão *</label>
+              <label>Versão *
               <input value={version} onChange={e => setVersion(e.target.value)}
-                placeholder="ex: v1.2" maxLength={30} />
+                placeholder="ex: v1.2" maxLength={30} /></label>
             </div>
           </div>
 
           <div className="pnf-field">
-            <label>Resumo <span className="pnf-optional">(opcional)</span></label>
+            <label>Resumo <span className="pnf-optional">(opcional)</span>
             <textarea value={summary} onChange={e => setSummary(e.target.value)}
-              placeholder="Descreva brevemente as mudanças..." maxLength={500} rows={2} />
+              placeholder="Descreva brevemente as mudanças..." maxLength={500} rows={2} /></label>
             <span className="pnf-char-count">{summary.length}/500</span>
           </div>
 
@@ -702,17 +703,17 @@ function PatchNoteForm({ onClose, onCreate }) {
                     <div className="pnf-entry-header">
                       <div className="pnf-row-3">
                         <div className="pnf-field">
-                          <label>Nome</label>
+                          <label>Nome
                           <input value={entry.name}
                             onChange={e => updateEntry(si, ei, { name: e.target.value })}
-                            placeholder={section.title === 'Classes' ? 'ex: Guerreiro' : 'ex: Fireball'} />
+                            placeholder={section.title === 'Classes' ? 'ex: Guerreiro' : 'ex: Fireball'} /></label>
                         </div>
                         <div className="pnf-field">
-                          <label>Tipo</label>
+                          <label>Tipo
                           <select value={entry.type}
                             onChange={e => updateEntry(si, ei, { type: e.target.value })}>
                             {ENTRY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                          </select>
+                          </select></label>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: '2px' }}>
                           <button onClick={() => removeEntry(si, ei)} className="pnf-icon-btn pnf-btn-danger"
@@ -721,10 +722,10 @@ function PatchNoteForm({ onClose, onCreate }) {
                       </div>
 
                       <div className="pnf-field">
-                        <label>Contexto <span className="pnf-optional">(opcional)</span></label>
+                        <label>Contexto <span className="pnf-optional">(opcional)</span>
                         <input value={entry.context}
                           onChange={e => updateEntry(si, ei, { context: e.target.value })}
-                          placeholder="Explicação narrativa da mudança..." maxLength={300} />
+                          placeholder="Explicação narrativa da mudança..." maxLength={300} /></label>
                       </div>
                     </div>
 
@@ -777,17 +778,19 @@ function PatchNoteForm({ onClose, onCreate }) {
           <div className="pnf-divider">Documento de regras <span className="pnf-optional">(ao menos um)</span></div>
 
           <div className="pnf-field">
-            <label><LinkIcon size={11} /> Link do Homebrewery</label>
+            <label><LinkIcon size={11} /> Link do Homebrewery
             <input value={homebrewUrl}
               onChange={e => { setHomebrew(e.target.value); validateUrl(e.target.value); }}
-              placeholder="https://homebrewery.naturalcrit.com/share/..." type="url" />
+              placeholder="https://homebrewery.naturalcrit.com/share/..." type="url" /></label>
             {urlError && <span className="pnf-error">{urlError}</span>}
             {homebrewUrl && !urlError && <span className="pnf-hint">✓ Link válido</span>}
           </div>
 
           <div className="pnf-field">
-            <label><Upload size={11} /> Arquivo (PDF / imagem)</label>
+            <p className="ui-form-help">Arquivo (PDF / imagem)</p>
             <div className={`pnf-dropzone ${file ? 'pnf-dropzone-filled' : ''}`}
+              role="button" tabIndex={0} aria-label="Escolher arquivo PDF ou imagem"
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click(); } }}
               onClick={() => fileRef.current?.click()}
               onDragOver={e => e.preventDefault()}
               onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setFile(f); }}>
@@ -881,7 +884,7 @@ function PatchNoteForm({ onClose, onCreate }) {
         .pnf-btn-submit:hover:not(:disabled) { background: var(--crimson-bright); }
         .pnf-btn-submit:disabled { opacity: 0.4; cursor: not-allowed; }
       `}</style>
-    </div>
+    </Modal>
   );
 }
 
@@ -892,33 +895,25 @@ export default function PatchNotesPage() {
   const [notes,    setNotes]    = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState('');
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
-    setLoading(true);
+    setLoading(true); setError('');
     api.get(currentUserIsGM ? '/patch-notes/all' : '/patch-notes')
-      .then(setNotes).catch(console.error)
+      .then(setNotes).catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, [currentUserIsGM]);
+  }, [currentUserIsGM, revision]);
 
   return (
     <div className="pn-page">
-      <div className="pn-page-header">
-        <div>
-          <h2 className="pn-page-title">📜 Atualizações de Regras</h2>
-          <p className="pn-page-sub">Notas de patch e documentos de regras da campanha</p>
-        </div>
-        {currentUserIsGM && (
-          <button onClick={() => setShowForm(true)} className="pn-new-btn">
-            <Plus size={14} /> Nova nota
-          </button>
-        )}
-      </div>
-
+      <PageHeader eyebrow="O livro da campanha" title="Atualizações de regras" description="Consulte as mudanças, os documentos e as notas compartilhadas pelos mestres." action={currentUserIsGM && <Button variant="primary" onClick={() => setShowForm(true)}><Plus size={16} /> Nova nota</Button>} />
+      {error && <StatePanel kind="error" title="Não foi possível carregar as atualizações" action={<Button onClick={() => setRevision(v => v + 1)}>Tentar novamente</Button>}>{error}</StatePanel>}
       {loading ? (
         <div className="pn-loading">
           {[1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 140, borderRadius: 'var(--radius-lg)' }} />)}
         </div>
-      ) : notes.length === 0 ? (
+      ) : notes.length === 0 && !error ? (
         <div className="pn-empty">
           <BookOpen size={32} style={{ opacity: 0.3 }} />
           <p>Nenhuma nota de patch publicada ainda.</p>

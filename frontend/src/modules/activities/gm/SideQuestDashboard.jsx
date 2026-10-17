@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../../lib/api.js';
 import SideQuestForm from './SideQuestForm.jsx';
 import SideQuestDetail from './SideQuestDetail.jsx';
@@ -20,7 +20,7 @@ export default function SideQuestDashboard() {
   const [activeView, setActiveView] = useState('list'); // 'list' | 'create' | 'detail'
   const [selectedActivityId, setSelectedActivityId] = useState(null);
 
-  const loadActivities = async () => {
+  const loadActivities = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -35,13 +35,13 @@ export default function SideQuestDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
 
   useEffect(() => {
     if (activeView === 'list') {
       loadActivities();
     }
-  }, [filter, activeView]);
+  }, [loadActivities, activeView]);
 
   const handleCreated = () => {
     setActiveView('list');
@@ -70,7 +70,7 @@ export default function SideQuestDashboard() {
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* Top Filters & Action button */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', gap: '6px' }}>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {STATUS_FILTERS.map(f => (
             <button
               key={f.value}
@@ -121,7 +121,7 @@ export default function SideQuestDashboard() {
             <div key={i} className="skeleton" style={{ height: '60px', borderRadius: 'var(--radius)' }} />
           ))}
         </div>
-      ) : activities.length === 0 ? (
+      ) : activities.length === 0 && !error ? (
         <div style={{
           textAlign: 'center', padding: '48px 24px', color: 'var(--text-muted)',
           border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)',
@@ -131,7 +131,7 @@ export default function SideQuestDashboard() {
         </div>
       ) : (
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
+          <div className="sidequest-table" role="region" aria-label="Lista de atividades" tabIndex={0}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', background: 'var(--bg-soft)' }}>
@@ -149,6 +149,7 @@ export default function SideQuestDashboard() {
                   <tr
                     key={act.id}
                     onClick={() => handleRowClick(act.id)}
+                    aria-label={'Abrir atividade ' + act.title}
                     style={{
                       borderBottom: '1px solid var(--border-bright)',
                       cursor: 'pointer',
@@ -157,7 +158,7 @@ export default function SideQuestDashboard() {
                     onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-card-hover)'}
                     onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
                   >
-                    <td style={{ padding: '14px 16px', fontWeight: 600 }}>{act.title}</td>
+                    <td style={{ padding: '14px 16px', fontWeight: 600 }}><button type="button" className="ui-button ui-button-ghost" onClick={event => { event.stopPropagation(); handleRowClick(act.id); }}>{act.title}</button></td>
                     <td style={{ padding: '14px 16px', textTransform: 'uppercase' }}>{act.rules?.attribute}</td>
                     <td style={{ padding: '14px 16px' }}>{act.progress} / {act.goal}</td>
                     <td style={{ padding: '14px 16px' }}>{act.participantCount ?? 0}</td>

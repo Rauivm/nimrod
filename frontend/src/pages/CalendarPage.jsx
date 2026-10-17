@@ -1,3 +1,4 @@
+import { PageHeader, Modal, StatePanel, Button } from '../components/ui.jsx';
 /**
  * CalendarPage.jsx
  *
@@ -16,9 +17,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api.js';
 import { useAuth, isGM } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
-import {
-  ChevronLeft, ChevronRight, Pencil, History, X, Loader2,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, Pencil, History, Loader2 } from 'lucide-react';
 import { getSeasonConfig, getSeasonImage } from '../config/calendarSeasons.js';
 import { getEffectIcon, getEffectBadge } from '../config/seasonEffectDisplay.js';
 import { SeasonEffectsEditor } from '../components/SeasonEffectsEditor.jsx';
@@ -43,24 +42,21 @@ function SetSessionModal({ currentSession, onClose, onConfirm, busy }) {
   const valid = Number.isInteger(parsed) && parsed >= 1;
 
   return (
-    <div className="cal-modal-overlay" onClick={onClose}>
-      <div className="cal-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="cal-modal-header">
-          <span>Definir sessão manualmente</span>
-          <button onClick={onClose} className="cal-modal-close"><X size={16} /></button>
-        </div>
+    <Modal title="Definir sessão manualmente" onClose={onClose}>
+      <div className="calendar-dialog-body">
+
         <p className="cal-modal-hint">
           Uso administrativo — corrige a sessão corrente do mundo diretamente.
           Essa ação fica registrada na auditoria.
         </p>
         <input
+          aria-label="Sessão corrente do mundo"
           type="number"
           min={1}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           className="cal-modal-input"
-          autoFocus
-        />
+          />
         <div className="cal-modal-actions">
           <button onClick={onClose} className="cal-btn-ghost">Cancelar</button>
           <button
@@ -72,7 +68,7 @@ function SetSessionModal({ currentSession, onClose, onConfirm, busy }) {
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -89,13 +85,10 @@ function HistoryModal({ onClose }) {
   const actionLabel = { next: 'Avançou', previous: 'Voltou', set: 'Definiu' };
 
   return (
-    <div className="cal-modal-overlay" onClick={onClose}>
-      <div className="cal-modal cal-modal-lg" onClick={(e) => e.stopPropagation()}>
-        <div className="cal-modal-header">
-          <span>Histórico do calendário</span>
-          <button onClick={onClose} className="cal-modal-close"><X size={16} /></button>
-        </div>
-        {error && <p className="cal-error">{error}</p>}
+    <Modal title="Histórico do calendário" onClose={onClose}>
+      <div className="calendar-dialog-body">
+
+        {error && <p className="cal-error" role="alert">{error}</p>}
         {!history && !error && <p className="cal-modal-hint">Carregando…</p>}
         {history && history.length === 0 && <p className="cal-modal-hint">Nenhuma alteração registrada ainda.</p>}
         {history && history.length > 0 && (
@@ -114,7 +107,7 @@ function HistoryModal({ onClose }) {
           </div>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -164,14 +157,15 @@ export default function CalendarPage() {
   if (error && !state) {
     return (
       <div className="cal-page">
-        <p className="cal-error">Não foi possível carregar o calendário: {error}</p>
+        <PageHeader title="Calendário do Mundo" />
+        <StatePanel kind="error" title="Não foi possível carregar o calendário" action={<Button onClick={load}>Tentar novamente</Button>}>{error}</StatePanel>
       </div>
     );
   }
 
   if (!state) {
     return (
-      <div className="cal-page cal-loading">
+      <div className="cal-page cal-loading" role="status">
         <Loader2 size={22} className="spin" />
         <span>Carregando calendário…</span>
       </div>
@@ -186,14 +180,7 @@ export default function CalendarPage() {
 
   return (
     <div className="cal-page">
-      <div className="cal-header">
-        <h1>Calendário do Mundo</h1>
-        {gm && (
-          <button className="cal-btn-ghost cal-history-btn" onClick={() => setShowHistoryModal(true)}>
-            <History size={14} /> Histórico
-          </button>
-        )}
-      </div>
+      <PageHeader eyebrow="O tempo da sua campanha" title="Calendário do Mundo" description="Acompanhe a estação, os efeitos e o ritmo das histórias do mundo." action={gm && <button className="cal-btn-ghost cal-history-btn" onClick={() => setShowHistoryModal(true)}><History size={16} /> Histórico</button>} />
 
       {error && <p className="cal-error">{error}</p>}
 

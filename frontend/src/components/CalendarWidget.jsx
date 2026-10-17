@@ -1,3 +1,4 @@
+import { StatePanel, Button } from './ui.jsx';
 /**
  * CalendarWidget.jsx
  *
@@ -22,9 +23,10 @@ import { getEffectIcon, getEffectBadge } from '../config/seasonEffectDisplay.js'
 export function CalendarWidget() {
   const { on } = useWs();
   const [state, setState] = useState(null);
+  const [error, setError] = useState('');
 
   const load = useCallback(() => {
-    api.get('/world/calendar').then(setState).catch(() => {});
+    api.get('/world/calendar').then(data => { setState(data); setError(''); }).catch(e => setError(e.message));
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -39,7 +41,8 @@ export function CalendarWidget() {
     return unsub;
   }, [on, load]);
 
-  if (!state) return null;
+  if (error) return <StatePanel kind="error" title="Calendário indisponível" action={<Button onClick={load}>Tentar novamente</Button>}>{error}</StatePanel>;
+  if (!state) return <p role="status" className="ui-form-help">Carregando calendário…</p>;
 
   const season      = getSeasonConfig(state.season);
   const nextSeason  = getSeasonConfig(state.nextSeason);

@@ -1,6 +1,7 @@
+import { PageHeader, Button, StatePanel, useToast } from '../components/ui.jsx';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../lib/api.js';
-import { useAuth, isGM, isGMPrincipal, roleLabel } from '../contexts/AuthContext.jsx';
+import { useAuth, isGM } from '../contexts/AuthContext.jsx';
 import { Upload, Download, Trash2, Map } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -9,6 +10,8 @@ import { optimizeImageFile } from '../lib/imageOptimization.js';
 export default function MapsPage() {
   const { user } = useAuth();
   const [maps, setMaps] = useState([]);
+  const [error, setError] = useState('');
+  const notify = useToast();
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef();
@@ -16,9 +19,9 @@ export default function MapsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const data = await api.get('/maps').catch(() => []);
-    setMaps(data);
-    setLoading(false);
+    setError('');
+    try { setMaps(await api.get('/maps')); } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -26,9 +29,9 @@ export default function MapsPage() {
   const upload = async (e) => {
     e.preventDefault();
     const file = fileRef.current?.files?.[0];
-    if (!file) return alert('Selecione um arquivo');
+    if (!file) { setError('Selecione um arquivo.'); return; }
 
-    setUploading(true);
+    setUploading(true); setError('');
     try {
       const uploadFile = await optimizeImageFile(file);
       const fd = new FormData();
@@ -37,11 +40,12 @@ export default function MapsPage() {
       fd.append('description', uploadForm.description);
 
       const created = await api.uploadMap(fd);
+      notify('Mapa enviado para a comunidade.');
       setUploadForm({ title: '', description: '' });
       fileRef.current.value = '';
       const optimisticMap = { ...created, uploader_name: user?.displayName || user?.name || created.uploader_name };
       setMaps(prev => prev.some(m => m.id === created.id) ? prev : [optimisticMap, ...prev]);
-    } catch (e) { alert(e.message); }
+    } catch (e) { setError(e.message); }
     setUploading(false);
   };
 
@@ -57,9 +61,8 @@ export default function MapsPage() {
 
   return (
     <div className="maps-page">
-      <div className="page-header">
-        <h1 className="page-title">🗺 Mapas</h1>
-      </div>
+      <PageHeader eyebrow="Explore o mundo" title="Mapas" description="Cenários, regiões e caminhos para a próxima aventura. Baixe os mapas compartilhados pela comunidade." />
+      {error && <StatePanel kind="error" title="Não foi possível concluir a operação" action={<Button onClick={load}>Tentar novamente</Button>}>{error}</StatePanel>}
 
       {currentUserIsGM && (
         <div className="upload-section">
@@ -67,17 +70,17 @@ export default function MapsPage() {
           <form onSubmit={upload} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div className="form-row">
               <div className="form-group">
-                <label>Título</label>
-                <input value={uploadForm.title} onChange={e => setUploadForm(p => ({...p, title: e.target.value}))} placeholder="Nome do mapa" />
+                <label htmlFor="map-title">Título</label>
+                <input id="map-title" value={uploadForm.title} onChange={e => setUploadForm(p => ({...p, title: e.target.value}))} placeholder="Nome do mapa" />
               </div>
               <div className="form-group">
-                <label>Arquivo *</label>
-                <input type="file" ref={fileRef} accept="image/*,.pdf" required style={{ padding: '6px' }} />
+                <label htmlFor="map-file">Arquivo *</label>
+                <input id="map-file" type="file" ref={fileRef} accept="image/*,.pdf" required style={{ padding: '6px' }} />
               </div>
             </div>
             <div className="form-group">
-              <label>Descrição</label>
-              <input value={uploadForm.description} onChange={e => setUploadForm(p => ({...p, description: e.target.value}))} placeholder="Opcional..." />
+              <label htmlFor="map-description">Descrição</label>
+              <input id="map-description" value={uploadForm.description} onChange={e => setUploadForm(p => ({...p, description: e.target.value}))} placeholder="Opcional..." />
             </div>
             <button type="submit" disabled={uploading} className="upload-btn">
               <Upload size={14} /> {uploading ? 'Enviando...' : 'Enviar Mapa'}
@@ -89,7 +92,7 @@ export default function MapsPage() {
       <div className="maps-grid">
         {loading ? (
           [1,2,3].map(i => <div key={i} className="skeleton" style={{ height: '80px' }} />)
-        ) : maps.length === 0 ? (
+        ) : maps.length === 0 && !error ? (
           <div className="empty-state">
             <Map size={32} style={{ opacity: 0.2 }} />
             <span>Nenhum mapa disponível</span>
@@ -106,11 +109,11 @@ export default function MapsPage() {
                 </span>
               </div>
               <div className="map-actions">
-                <a href={m.file_url} download={m.file_name} className="download-btn" title="Baixar">
+                <a href={m.file_url} download={m.file_name} className="download-btn" title="Baixar" aria-label={`Baixar mapa ${m.title}`}>
                   <Download size={14} />
                 </a>
                 {currentUserIsGM && (
-                  <button onClick={() => del(m.id)} className="map-delete-btn">
+                  <button onClick={() => del(m.id)} className="map-delete-btn" aria-label={`Remover mapa ${m.title}`}>
                     <Trash2 size={13} />
                   </button>
                 )}

@@ -1,3 +1,4 @@
+import { Modal } from './ui.jsx';
 import { useState } from 'react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -37,7 +38,7 @@ export default function ChooseNameModal() {
   };
 
   return (
-    <div className="cn-overlay">
+    <Modal title="Como quer ser chamado?" showHeader={false} dismissible={false}>
       <div className="cn-modal animate-in">
         <div className="cn-icon"><Feather size={28} strokeWidth={1.5} /></div>
 
@@ -48,8 +49,7 @@ export default function ChooseNameModal() {
         </p>
 
         <input
-          autoFocus
-          className="cn-input"
+          aria-label="Seu nome de aventureiro" className="cn-input"
           value={value}
           onChange={e => setValue(e.target.value)}
           onKeyDown={handleKey}
@@ -58,7 +58,7 @@ export default function ChooseNameModal() {
           disabled={loading}
         />
 
-        {error && <p className="cn-error">{error}</p>}
+        {error && <p className="cn-error" role="alert">{error}</p>}
 
         <button className="cn-btn" onClick={submit} disabled={loading}>
           {loading ? 'Salvando...' : 'Entrar na Taverna'}
@@ -121,6 +121,6 @@ export default function ChooseNameModal() {
         }
         .cn-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
       `}</style>
-    </div>
+    </Modal>
   );
 }

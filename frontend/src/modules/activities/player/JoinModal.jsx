@@ -1,3 +1,4 @@
+import { Modal } from '../../../components/ui.jsx';
 import { useEffect, useState } from 'react';
 import { api } from '../../../lib/api.js';
 
@@ -47,11 +48,7 @@ export default function JoinModal({ activity, onClose, onJoined }) {
   };
 
   return (
-    <div className="modal-backdrop" style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(4px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-    }}>
+    <Modal title="Participar da atividade" showHeader={false} onClose={onClose} dismissible={true}>
       <div className="modal-content" style={{
         background: 'var(--bg-modal)', border: '1px solid var(--border-bright)',
         padding: '24px', borderRadius: 'var(--radius-lg)', width: '90%', maxWidth: '450px',
@@ -62,7 +59,7 @@ export default function JoinModal({ activity, onClose, onJoined }) {
             <h3 style={{ fontFamily: 'var(--font-display)', color: 'var(--gold)', marginBottom: '16px', fontSize: '20px' }}>
               {isMana ? 'Personagem inscrito' : 'Rolagem de Inscrição!'}
             </h3>
-            
+
             <div style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '24px' }}>
               {isMana ? rollResult.characterName : 'Personagem inscrito com sucesso. Veja o resultado do seu teste:'}
             </div>
@@ -105,7 +102,7 @@ export default function JoinModal({ activity, onClose, onJoined }) {
             <h3 style={{ fontFamily: 'var(--font-display)', color: 'var(--gold)', marginBottom: '12px', fontSize: '20px' }}>
               Inscrever-se em {activity.title}
             </h3>
-            
+
             <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px' }}>
               {isMana ? 'Selecione seu personagem para a aventura no jogo 2D.' : 'Selecione o personagem que irá participar desta atividade. O teste de atributo será realizado automaticamente.'}
             </p>
@@ -132,7 +129,7 @@ export default function JoinModal({ activity, onClose, onJoined }) {
               <div style={{ marginBottom: '24px' }}>
                 <label style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>
                   Escolha o Personagem
-                </label>
+
                 <select
                   value={selectedCharId}
                   onChange={(e) => setSelectedCharId(e.target.value)}
@@ -148,7 +145,7 @@ export default function JoinModal({ activity, onClose, onJoined }) {
                       {char.name} (Nív. {char.level} {char.class})
                     </option>
                   ))}
-                </select>
+                </select></label>
               </div>
             )}
 
@@ -165,7 +162,7 @@ export default function JoinModal({ activity, onClose, onJoined }) {
               >
                 Cancelar
               </button>
-              
+
               <button
                 type="submit"
                 disabled={joining || characters.length === 0}
@@ -182,6 +179,6 @@ export default function JoinModal({ activity, onClose, onJoined }) {
           </form>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -1,3 +1,4 @@
+import { PageHeader, Modal, StatePanel, Button } from '../components/ui.jsx';
 /**
  * pages/SessionsPage.jsx
  *
@@ -178,15 +179,16 @@ function yesNo(value) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function useSessionList() {
+  const [error, setError] = useState('');
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading]   = useState(true);
   const { on } = useWs();
 
   const load = useCallback(async () => {
     setLoading(true);
-    const data = await api.get('/sessions').catch(() => []);
-    setSessions(data);
-    setLoading(false);
+    setError('');
+    try { setSessions(await api.get('/sessions')); } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -201,7 +203,7 @@ function useSessionList() {
     return () => { u1(); u2(); };
   }, [on]);
 
-  return { sessions, loading, reload: load };
+  return { sessions, loading, error, reload: load };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -209,6 +211,8 @@ function useSessionList() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function useSessionEvents(sessionId) {
+  const [error, setError] = useState('');
+  const request = useRef(0);
   const [events, setEvents]   = useState([]);
   const [loading, setLoading] = useState(false);
   const { on } = useWs();
@@ -216,18 +220,17 @@ function useSessionEvents(sessionId) {
   const load = useCallback(async (id) => {
     if (!id) return;
     setLoading(true);
-    const [resourceEvents, auditEvents] = await Promise.all([
-      api.get(`/sessions/${id}/events`).catch(() => []),
-      api.get(`/sessions/${id}/session-events`).catch(() => []),
-    ]);
-    setEvents(sortEventsDesc([
-      ...resourceEvents.map(normalizeResourceEvent),
-      ...auditEvents.map(normalizeAuditEvent),
-    ]));
-    setLoading(false);
+    const version = ++request.current;
+    setError('');
+    try {
+      const [resourceEvents, auditEvents] = await Promise.all([api.get(`/sessions/${id}/events`), api.get(`/sessions/${id}/session-events`)]);
+      if (version === request.current) setEvents(sortEventsDesc([...resourceEvents.map(normalizeResourceEvent), ...auditEvents.map(normalizeAuditEvent)]));
+    } catch (e) { if (version === request.current) setError(e.message); }
+    finally { if (version === request.current) setLoading(false); }
   }, []);
 
-  useEffect(() => { load(sessionId); }, [load, sessionId]);
+  const invalidate = useCallback(() => { request.current++; }, []);
+  useEffect(() => { setEvents([]); load(sessionId); return invalidate; }, [load, sessionId, invalidate]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -253,7 +256,7 @@ function useSessionEvents(sessionId) {
     return () => { u1(); u2(); u3(); u4(); };
   }, [on, sessionId]);
 
-  return { events, loading, reload: () => load(sessionId) };
+  return { events, loading, error, reload: () => load(sessionId) };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -388,7 +391,7 @@ const SessionItem = memo(function SessionItem({ session, active, onClick }) {
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <SessionIdBadge id={session.id} />
+        <span className="session-reference">Ref. {session.id.slice(0, 8)}</span>
       </div>
       {session.campaign && (
         <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
@@ -431,6 +434,8 @@ const EventRow = memo(function EventRow({ event, isGMPrincipal, onEdit, onDelete
           gap: 10, padding: '10px 14px',
           cursor: 'pointer',
         }}
+        role="button" tabIndex={0} aria-expanded={expanded} aria-label="Ver detalhes do evento"
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v); } }}
         onClick={() => setExpanded(v => !v)}
       >
         {/* Ícone do recurso */}
@@ -667,7 +672,7 @@ function EventFilters({ filter, onChange, playerOptions }) {
       <Filter size={12} style={{ color: 'var(--text-faint)', flexShrink: 0 }} />
 
       <select
-        value={filter.resourceType}
+        aria-label="Filtrar por recurso" value={filter.resourceType}
         onChange={e => onChange({ ...filter, resourceType: e.target.value })}
         style={{ width: 'auto', padding: '4px 8px', fontSize: 12 }}
       >
@@ -678,7 +683,7 @@ function EventFilters({ filter, onChange, playerOptions }) {
       </select>
 
       <select
-        value={filter.playerId}
+        aria-label="Filtrar por jogador" value={filter.playerId}
         onChange={e => onChange({ ...filter, playerId: e.target.value })}
         style={{ width: 'auto', padding: '4px 8px', fontSize: 12 }}
       >
@@ -689,7 +694,7 @@ function EventFilters({ filter, onChange, playerOptions }) {
       </select>
 
       <select
-        value={filter.source}
+        aria-label="Filtrar por origem" value={filter.source}
         onChange={e => onChange({ ...filter, source: e.target.value })}
         style={{ width: 'auto', padding: '4px 8px', fontSize: 12 }}
       >
@@ -936,41 +941,7 @@ function EventFormDrawer({ session, onClose, onCreated }) {
   const Icon = meta.icon;
 
   return (
-    <div style={{
-      position: 'fixed', top: 0, right: 0, bottom: 0,
-      width: 340, background: 'var(--bg-modal)',
-      borderLeft: '1px solid var(--border)',
-      boxShadow: '-4px 0 24px rgba(0,0,0,0.5)',
-      display: 'flex', flexDirection: 'column',
-      zIndex: 200, animation: 'slideInRight 0.2s ease-out',
-    }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '16px 18px', borderBottom: '1px solid var(--border)',
-      }}>
-        <div>
-          <div style={{
-            fontSize: 12, fontFamily: 'var(--font-display)',
-            letterSpacing: '1px', textTransform: 'uppercase',
-            color: 'var(--gold)', marginBottom: 2,
-          }}>
-            Registrar Evento
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', maxWidth: 220,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {session.title}
-          </div>
-        </div>
-        <button onClick={onClose} style={{
-          background: 'none', color: 'var(--text-muted)', padding: 4,
-          borderRadius: 3, display: 'flex',
-        }}>
-          <X size={16} />
-        </button>
-      </div>
-
-      {/* Form */}
+    <Modal title="Registrar evento" onClose={onClose} dismissible={!busy}>
       <form onSubmit={submit} style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
 
         {/* Jogador */}
@@ -1087,7 +1058,7 @@ function EventFormDrawer({ session, onClose, onCreated }) {
           {busy ? 'Registrando...' : 'Registrar Evento'}
         </PrimaryBtn>
       </form>
-    </div>
+    </Modal>
   );
 }
 
@@ -1231,35 +1202,7 @@ function DeleteEventModal({ event, onClose, onDeleted }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ModalOverlay({ children, onClose }) {
-  useEffect(() => {
-    const esc = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', esc);
-    return () => document.removeEventListener('keydown', esc);
-  }, [onClose]);
-
-  return (
-    <div
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        position: 'fixed', inset: 0,
-        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(3px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 300, padding: 24,
-      }}
-    >
-      <div style={{
-        background: 'var(--bg-modal)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-lg)',
-        padding: 24, width: '100%', maxWidth: 460,
-        boxShadow: 'var(--shadow-lg)',
-        animation: 'fadeIn 0.15s ease-out',
-        maxHeight: '90vh', overflowY: 'auto',
-      }}>
-        {children}
-      </div>
-    </div>
-  );
+  return <Modal title="Gerenciar sessão" onClose={onClose} showHeader={false}>{children}</Modal>;
 }
 
 function ModalHeader({ title, icon: Icon, onClose }) {
@@ -1382,27 +1325,15 @@ function GhostBtn({ children, ...props }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function SessionsPage() {
-  const { user }                          = useAuth();
-  const isGMPrincipal                     = isGMPrincipalFn(user);
-  const isGMRole                          = isGM(user);
+  const { user } = useAuth();
+  if (!isGM(user)) return <StatePanel title="Acesso restrito a mestres">As ferramentas de sessão ficam disponíveis para os narradores da comunidade.</StatePanel>;
+  return <SessionsWorkspace />;
+}
 
-  // Guarda de role — mostra tela de acesso negado para PLAYER
-  if (!isGMRole) {
-    return (
-      <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        justifyContent: 'center', height: '60vh', gap: 12,
-      }}>
-        <Lock size={32} style={{ color: 'var(--text-faint)' }} />
-        <p style={{ color: 'var(--text-muted)', fontSize: 14, fontFamily: 'var(--font-display)',
-          letterSpacing: '1px', textTransform: 'uppercase' }}>
-          Acesso restrito a Mestres
-        </p>
-      </div>
-    );
-  }
-
-  const { sessions, loading: loadingSessions } = useSessionList();
+function SessionsWorkspace() {
+  const { user } = useAuth();
+  const isGMPrincipal = isGMPrincipalFn(user);
+  const { sessions, loading: loadingSessions, error: sessionsError, reload: reloadSessions } = useSessionList();
 
   const [activeId,      setActiveId]      = useState(null);
   const [filter,        setFilter]        = useState({ resourceType: '', playerId: '', source: '' });
@@ -1418,7 +1349,7 @@ export default function SessionsPage() {
     [sessions, activeId],
   );
 
-  const { events, loading: loadingEvents } = useSessionEvents(activeId);
+  const { events, loading: loadingEvents, error: eventsError, reload: reloadEvents } = useSessionEvents(activeId);
 
   // Seleciona a sessão mais recente aberta ao carregar
   useEffect(() => {
@@ -1455,16 +1386,12 @@ export default function SessionsPage() {
   function handleDeleted(id)      { /* WS cuida da remoção */ }
 
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 56px)', overflow: 'hidden' }}>
+    <section className="sessions-page"><PageHeader eyebrow="A mesa do narrador" title="Sessões" description="Acompanhe encontros, presença e o registro das aventuras da comunidade." />
+      <div className="session-errors">{sessionsError && <StatePanel kind="error" title="Não foi possível carregar as sessões" action={<Button onClick={reloadSessions}>Tentar novamente</Button>}>{sessionsError}</StatePanel>}{eventsError && <StatePanel kind="error" title="Não foi possível carregar os registros" action={<Button onClick={reloadEvents}>Tentar novamente</Button>}>{eventsError}</StatePanel>}</div>
+    <div className="sessions-workspace">
 
       {/* ── Sidebar: lista de sessões ─────────────────────────────────── */}
-      <aside style={{
-        width: sidebarOpen ? 260 : 0, flexShrink: 0,
-        borderRight: '1px solid var(--border)',
-        display: 'flex', flexDirection: 'column',
-        overflow: 'hidden', transition: 'width 0.2s ease',
-        background: 'var(--bg-elevated)',
-      }}>
+<aside id="sessions-list" className={sidebarOpen ? 'sessions-sidebar' : 'sessions-sidebar is-collapsed'} aria-label="Lista de sessões">
         {/* Header sidebar */}
         <div style={{
           padding: '14px 14px 10px',
@@ -1523,19 +1450,13 @@ export default function SessionsPage() {
       </aside>
 
       {/* ── Painel central ─────────────────────────────────────────────── */}
-      <main style={{
-        flex: 1, display: 'flex', flexDirection: 'column',
-        overflow: 'hidden', minWidth: 0,
-      }}>
+<div className="sessions-main">
         {/* Toolbar */}
-        <div style={{
-          padding: '10px 16px',
-          borderBottom: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
-          background: 'var(--bg-elevated)',
-        }}>
+<div className="sessions-toolbar">
           {/* Toggle sidebar */}
           <button
+            aria-controls="sessions-list" aria-expanded={sidebarOpen}
+            aria-label={sidebarOpen ? 'Recolher lista de sessões' : 'Mostrar lista de sessões'}
             onClick={() => setSidebarOpen(v => !v)}
             title={sidebarOpen ? 'Recolher lista' : 'Mostrar lista'}
             style={{
@@ -1662,7 +1583,7 @@ export default function SessionsPage() {
             {filter.resourceType || filter.playerId || filter.source ? ' (filtrados)' : ''}
           </div>
         )}
-      </main>
+      </div>
 
       {/* ── Drawer: formulário de evento ──────────────────────────────── */}
       {showDrawer && activeSession && (
@@ -1699,7 +1620,7 @@ export default function SessionsPage() {
           50%       { opacity: 0.4; }
         }
       `}</style>
-    </div>
+    </div></section>
   );
 }
 

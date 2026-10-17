@@ -1,143 +1,17 @@
-import { memo, useCallback, useEffect, useState, useMemo } from 'react';
+import { Badge, Button, useToast } from './ui.jsx';
+import JoinMissionModal from './JoinMissionModal.jsx';
+import { MISSION_STATUSES, registrationSummary } from '../lib/missionPresentation.js';
+import '../styles/mission-board.css';
+import MissionActions from './MissionActions.jsx';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Users, Calendar, Coins, Edit3, Trash2, X, Check, UserPlus, ChevronDown, ChevronUp, Scroll, PlayCircle, Dice5, Clock3, Link, Monitor, Copy } from 'lucide-react';
+import { Users, Calendar, Coins, ChevronDown, ChevronUp, PlayCircle, Clock3, ScrollText, ShieldCheck, Hourglass, Crown, PauseCircle, CheckCircle2, XCircle, Megaphone } from 'lucide-react';
 import { api } from '../lib/api.js';
-import { useAuth, isGM, isGMPrincipal, roleLabel } from '../contexts/AuthContext.jsx';
-import JoinMissionModal from './JoinMissionModal.jsx';
+import { useAuth } from '../contexts/AuthContext.jsx';
 import { useFoundryLaunch } from '../hooks/useFoundryLaunch.js';
 
-// ── StartCampaignModal ─────────────────────────────────────────────────────────
-// Exibido ao narrador ao clicar "Iniciar campanha".
-// Instrui sobre o código do Foundry e inicia a campanha com um único clique.
-function StartCampaignModal({ missionId, missionTitle, onClose, onStarted }) {
-  const [code, setCode]       = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState('');
-  const [done, setDone]       = useState(false);
-
-  const handleStart = async () => {
-    const normalized = code.trim().toUpperCase();
-    if (normalized.length < 4) { setError('Digite o código exibido no painel Nimrod do Foundry.'); return; }
-    setLoading(true);
-    setError('');
-    try {
-      const result = await api.post(`/missions/${missionId}/start`, { code: normalized });
-      setDone(true);
-      setTimeout(() => onStarted(result), 1500);
-    } catch (e) {
-      setError(e.message);
-    }
-    setLoading(false);
-  };
-
-  return (
-    <div
-      style={{ position:'fixed', inset:0, zIndex:600, background:'rgba(0,0,0,0.85)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div style={{ background:'var(--bg-modal)', border:'1px solid var(--border-bright)', borderRadius:'12px', padding:'28px 24px', width:'min(100%, 440px)', boxShadow:'var(--shadow-lg)' }}>
-        {done ? (
-          <div style={{ textAlign:'center', padding:'20px 0' }}>
-            <div style={{ fontSize:40, marginBottom:12 }}>⚔️</div>
-            <div style={{ color:'#4a9a6a', fontFamily:'var(--font-display)', fontSize:16, fontWeight:700, letterSpacing:1 }}>Campanha iniciada!</div>
-            <div style={{ color:'var(--text-muted)', fontSize:13, marginTop:6 }}>O Foundry está vinculado e a sessão foi criada.</div>
-          </div>
-        ) : (
-          <>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:20 }}>
-              <div>
-                <div style={{ fontFamily:'var(--font-display)', fontSize:16, color:'var(--gold)', letterSpacing:1, fontWeight:700 }}>Iniciar campanha</div>
-                <div style={{ color:'var(--text-muted)', fontSize:12, marginTop:3 }}>{missionTitle}</div>
-              </div>
-              <button onClick={onClose} style={{ background:'none', color:'var(--text-muted)', border:'none', cursor:'pointer', padding:4 }}><X size={16} /></button>
-            </div>
-
-            {/* Tutorial */}
-            <div style={{ background:'rgba(201,168,76,0.06)', border:'1px solid rgba(201,168,76,0.2)', borderRadius:8, padding:'14px 16px', marginBottom:20, display:'flex', flexDirection:'column', gap:10 }}>
-              <div style={{ fontFamily:'var(--font-display)', fontSize:11, color:'var(--gold)', letterSpacing:1, textTransform:'uppercase' }}>Como funciona</div>
-              {[
-                { icon: <Monitor size={14}/>, text: 'Abra o Foundry VTT com o módulo Nimrod Bridge ativo' },
-                { icon: <Copy size={14}/>,    text: 'Um painel no canto da tela exibirá um código — copie ou anote' },
-                { icon: <Link size={14}/>,    text: 'Cole o código abaixo. A sessão será criada automaticamente.' },
-              ].map((s,i) => (
-                <div key={i} style={{ display:'flex', alignItems:'center', gap:10, color:'var(--text-muted)', fontSize:13 }}>
-                  <span style={{ color:'var(--gold)', opacity:0.8, flexShrink:0 }}>{s.icon}</span>{s.text}
-                </div>
-              ))}
-              <div style={{ fontSize:11, color:'var(--text-faint)', borderTop:'1px solid var(--border)', paddingTop:8, marginTop:2 }}>
-                O código é válido durante toda a campanha. Se o Foundry reiniciar, o mesmo código pode ser reutilizado.
-              </div>
-            </div>
-
-            {/* Input do código */}
-            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-              <label style={{ fontSize:12, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:0.5 }}>Código do Foundry</label>
-              <input
-                value={code}
-                onChange={e => { setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'')); setError(''); }}
-                onKeyDown={e => { if (e.key==='Enter') handleStart(); }}
-                placeholder="ABC1234"
-                maxLength={7}
-                autoFocus
-                style={{ fontFamily:'var(--font-mono)', fontSize:'clamp(18px, 6vw, 24px)', fontWeight:700, letterSpacing:'clamp(3px, 1.5vw, 8px)', textAlign:'center', background:'var(--bg-card)', border:`1px solid ${error ? 'var(--crimson)':'var(--border)'}`, borderRadius:6, padding:'10px 4px', color:'var(--gold)', outline:'none', width:'100%', boxSizing:'border-box' }}
-              />
-              {error && <div style={{ fontSize:12, color:'var(--crimson-bright)', textAlign:'center' }}>{error}</div>}
-            </div>
-
-            <div style={{ display:'flex', gap:10, marginTop:20 }}>
-              <button onClick={onClose} style={{ flex:1, padding:'10px', background:'transparent', border:'1px solid var(--border)', borderRadius:6, color:'var(--text-muted)', fontSize:13, cursor:'pointer' }}>
-                Cancelar
-              </button>
-              <button
-                onClick={handleStart}
-                disabled={loading || code.length < 4}
-                style={{ flex:1, padding:'10px', background:code.length >= 4 ? 'var(--crimson)':'var(--bg-card)', border:'1px solid rgba(196,48,48,0.3)', borderRadius:6, color:'#f0d0d0', fontSize:13, fontWeight:600, cursor:'pointer', opacity:code.length<4?0.5:1, transition:'all 0.15s' }}
-              >
-                {loading ? 'Iniciando…' : '⚔️ Iniciar campanha'}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function idToRotation(id) {
-  if (!id) return 0;
-  const hash = id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  return ((hash % 100) / 100 - 0.5) * 6.4;
-}
-
 // ── Sub-components ─────────────────────────────────────────────────────────────
-
-function ParticipantAvatars({ count, maxPlayers, userJoined }) {
-  const slots = Math.min(count, 5);
-  const colors = ['#8b2020','#7a4020','#2a5a3a','#2a3a7a','#5a2a7a'];
-  return (
-    <div className="poster-avatars">
-      {Array.from({ length: slots }).map((_, i) => (
-        <div key={i} className="poster-avatar"
-          style={{
-            background: colors[i % colors.length],
-            marginLeft: i === 0 ? 0 : '-8px',
-            zIndex: slots - i,
-            border: userJoined && i === 0 ? '2px solid #c9a84c' : '2px solid rgba(200,169,112,0.2)',
-          }}>
-          {i === 0 && userJoined ? '📌' : '⚔'}
-        </div>
-      ))}
-      {count > 5 && (
-        <div className="poster-avatar poster-avatar-overflow" style={{ marginLeft: '-8px', zIndex: 0 }}>
-          +{count - 5}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function foundryAsset(src) {
   if (!src) return null;
@@ -149,41 +23,22 @@ function foundryAsset(src) {
   }
 }
 
-function inviteDisplayName(player) {
-  return player?.displayName || player?.display_name || player?.name || 'Jogador';
-}
-
-function inviteCharacter(player) {
-  const characters = player?.characters || player?.playerCharacters || [];
-  return Array.isArray(characters) ? characters[0] : null;
-}
-
-function inviteAvatar(player, character) {
-  return character?.tokenImg || character?.token_img || character?.portraitImg || character?.portrait_img || player?.avatarUrl || player?.avatar_url || null;
-}
-
-function RealParticipantAvatars({ participants = [], count, userJoined }) {
+function RealParticipantAvatars({ participants = [], count, userId }) {
   const visible = participants.slice(0, 5);
-  const colors = ['#8b2020','#7a4020','#2a5a3a','#2a3a7a','#5a2a7a'];
   return (
     <div className="poster-avatars">
       {visible.map((p, i) => (
         <div key={`${p.userId}-${p.characterId || i}`}
-          className={`poster-avatar ${p.isGM ? 'poster-avatar-gm' : ''} ${p.dead || p.retired || !p.active ? 'poster-avatar-muted' : ''}`}
+          className={`poster-avatar ${p.isGM ? 'poster-avatar-gm' : ''} ${p.dead || p.retired || !p.active ? 'poster-avatar-muted' : ''} ${p.userId === userId ? 'poster-avatar-self' : ''}`}
           title={`${p.characterName || p.playerName}${p.isGM ? ' · GM' : ''}${p.dead ? ' · morto' : p.retired ? ' · aposentado' : !p.active ? ' · inativo' : ''}`}
-          style={{
-            background: colors[i % colors.length],
-            marginLeft: i === 0 ? 0 : '-8px',
-            zIndex: visible.length - i,
-            border: userJoined && i === 0 ? '2px solid #c9a84c' : '2px solid rgba(200,169,112,0.2)',
-          }}>
+          >
           {p.tokenImg || p.portraitImg
             ? <img src={foundryAsset(p.tokenImg || p.portraitImg)} alt={p.characterName || p.playerName} className="poster-avatar-img" />
             : <span>{(p.characterName || p.playerName || '?')[0]}</span>}
         </div>
       ))}
       {count > 5 && (
-        <div className="poster-avatar poster-avatar-overflow" style={{ marginLeft: '-8px', zIndex: 0 }}>
+        <div className="poster-avatar poster-avatar-overflow">
           +{count - 5}
         </div>
       )}
@@ -192,12 +47,13 @@ function RealParticipantAvatars({ participants = [], count, userJoined }) {
 }
 
 function StarRating({ missionId, avgRating, canRate, onRated }) {
+  const notify = useToast();
   const [hovered, setHovered] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const rate = async (stars) => {
     setSubmitting(true);
     try { await api.post(`/missions/${missionId}/rate`, { stars }); onRated?.(); }
-    catch (e) { alert(e.message); }
+    catch (e) { notify(e.message, 'error'); }
     setSubmitting(false);
   };
   return (
@@ -205,7 +61,7 @@ function StarRating({ missionId, avgRating, canRate, onRated }) {
       {canRate && [1,2,3,4,5].map(s => (
         <button key={s} onClick={() => rate(s)}
           onMouseEnter={() => setHovered(s)} onMouseLeave={() => setHovered(0)}
-          disabled={submitting} className={`star-btn ${s <= hovered ? 'star-lit' : ''}`}>★</button>
+          aria-label={`Avaliar com ${s} estrelas`} disabled={submitting} className={`star-btn ${s <= hovered ? 'star-lit' : ''}`}>★</button>
       ))}
       {avgRating > 0 && <span className="poster-avg-rating">★ {parseFloat(avgRating).toFixed(1)}</span>}
     </div>
@@ -216,6 +72,7 @@ function StarRating({ missionId, avgRating, canRate, onRated }) {
 const REACTION_EMOJIS = ['⚔️','🔥','💀','🍺','👁️','🐉'];
 
 function ReactionBar({ missionId, reactions = [], onUpdate }) {
+  const notify = useToast();
   const [picking, setPicking] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -239,13 +96,13 @@ function ReactionBar({ missionId, reactions = [], onUpdate }) {
       onUpdate?.(res.reactions);
     } catch (e) {
       onUpdate?.(previous);
-      alert(e.message);
+      notify(e.message, 'error');
     }
     setLoading(false);
   };
 
   return (
-    <div className="reaction-bar" onClick={e => e.stopPropagation()}>
+    <div className="reaction-bar">
       {/* Existing reactions */}
       {reactions.map(r => (
         <button
@@ -277,6 +134,7 @@ function ReactionBar({ missionId, reactions = [], onUpdate }) {
 
 // ── Inline Poll ────────────────────────────────────────────────────────────────
 function InlinePoll({ missionId, poll, onUpdate }) {
+  const notify = useToast();
   const [voting, setVoting] = useState(false);
   if (!poll) return null;
 
@@ -288,12 +146,12 @@ function InlinePoll({ missionId, poll, onUpdate }) {
     try {
       await api.post(`/missions/${missionId}/poll/vote`, { optionId });
       onUpdate?.();
-    } catch (e) { alert(e.message); }
+    } catch (e) { notify(e.message, 'error'); }
     setVoting(false);
   };
 
   return (
-    <div className="inline-poll" onClick={e => e.stopPropagation()}>
+    <div className="inline-poll">
       <div className="inline-poll-question">📊 {poll.question}</div>
       <div className="inline-poll-options">
         {poll.options.map(opt => {
@@ -319,31 +177,27 @@ function InlinePoll({ missionId, poll, onUpdate }) {
 }
 
 // ── Main poster ────────────────────────────────────────────────────────────────
-export const MissionPoster = memo(function MissionPoster({ mission: initialMission, onUpdate }) {
+export const MissionPoster = memo(function MissionPoster({ mission: initialMission, onUpdate, compact = false }) {
   const { user } = useAuth();
-  const { launch, loading: launchingFoundry } = useFoundryLaunch();
+  const { launch, loading: launchingFoundry, error: launchError } = useFoundryLaunch();
   const [mission, setLocalMission] = useState(initialMission);
   const [expanded, setExpanded] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [showInvite, setShowInvite] = useState(false);
-  const [inviteUsers, setInviteUsers] = useState([]);
+  const [joining, setJoining] = useState(false);
+  const notify = useToast();
+  useEffect(() => { if (launchError) notify(launchError, 'error'); }, [launchError, notify]);
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({});
-  const [showJoinModal, setShowJoinModal] = useState(false);
 
   useEffect(() => {
     setLocalMission(initialMission);
   }, [initialMission]);
 
-  const rotation = useMemo(() => idToRotation(mission.id), [mission.id]);
 
   const isNotice   = mission.kind === 'NOTICE';
   const isCreator  = user?.id === mission.creator_id;
-  const currentUserIsGM       = isGM(user);
-  const canManage  = isCreator || currentUserIsGM;
-  const isOpen     = mission.status === 'OPEN';
+  const canManage  = isCreator || user?.id === mission.gm_id;
+  const isOpen     = ['OPEN','CLOSED','PAUSED'].includes(mission.status) && mission.registrations_open && (!mission.registration_deadline || new Date(mission.registration_deadline) > new Date());
   const isFinished = mission.status === 'FINISHED';
-  const isClosed   = mission.status === 'CLOSED';
   const isDimmed   = isFinished;
 
   const isUserReserve = mission.user_is_reserve === true;
@@ -357,20 +211,15 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
   const participants = mission.participants ?? [];
   const activeSession = mission.activeSession ?? null;
   const lastSession = mission.lastSession ?? null;
-  const canOpenSession  = !isNotice && canManage;
   const isRunning       = mission.status === 'RUNNING';
-  const canEnterFoundry = !isNotice && activeSession && (isCreator || (isOpen && mission.user_joined));
 
   // Banner: MISSÃO / AVISO / ENCERRADO / CONCLUÍDO
   const bannerLabel = isNotice
     ? 'AVISO'
-    : isOpen ? 'MISSÃO' : isClosed ? 'INSCRIÇÕES FECHADAS' : isRunning ? 'EM ANDAMENTO' : 'CONCLUÍDO';
+    : mission.status === 'PAUSED' ? 'PAUSADA' : mission.status === 'CANCELLED' ? 'CANCELADA' : isRunning ? 'EM ANDAMENTO' : isFinished ? 'CONCLUÍDO' : isOpen ? 'MISSÃO' : 'INSCRIÇÕES FECHADAS';
 
-  const bannerColor = isNotice
-    ? 'linear-gradient(90deg, #4a3800 0%, #2e2200 50%, #4a3800 100%)'
-    : isRunning
-      ? 'linear-gradient(90deg, #1a4a1a 0%, #0e2e0e 50%, #1a4a1a 100%)'
-      : 'linear-gradient(90deg, #7a1818 0%, #5a0e0e 50%, #7a1818 100%)';
+  const availability = registrationSummary(mission);
+  const StatusIcon = isNotice ? Megaphone : isRunning ? PlayCircle : isFinished ? CheckCircle2 : mission.status === 'CANCELLED' ? XCircle : mission.status === 'PAUSED' ? PauseCircle : ScrollText;
 
   // Actions
   const emitMission = useCallback((updated) => {
@@ -381,84 +230,14 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
     else onUpdate?.();
   }, [onUpdate]);
 
-  // Opens the character-picker modal instead of joining directly
-  const join = () => {
-    setShowJoinModal(true);
-  };
-
-  const handleJoined = (res) => {
-    emitMission(res.mission);
-  };
-  const leave = async () => {
-    const previous = mission;
-    setLocalMission(m => ({
-      ...m,
-      user_joined: false,
-      player_count: String(Math.max((parseInt(m.player_count) || 0) - 1, 0)),
-    }));
-    setLoading(true);
-    try {
-      const res = await api.delete(`/missions/${mission.id}/join`);
-      emitMission(res.mission);
-    }
-    catch (e) { setLocalMission(previous); alert(e.message); }
-    setLoading(false);
-  };
-  const setStatus = async (status) => {
-    setLoading(true);
-    try {
-      const updated = await api.patch(`/missions/${mission.id}`, { status });
-      emitMission(updated);
-    }
-    catch (e) { alert(e.message); }
-    setLoading(false);
-  };
-  const deleteMission = async () => {
-    if (!confirm('Apagar esta missão?')) return;
-    try { await api.delete(`/missions/${mission.id}`); onUpdate?.(); }
-    catch (e) { alert(e.message); }
-  };
-  const loadInviteUsers = async () => {
-    const us = await api.get('/users');
-    setInviteUsers(us);
-    setShowInvite(true);
-  };
-  const invite = async (userId) => {
-    try {
-      const updated = await api.post(`/missions/${mission.id}/invite`, { userId });
-      emitMission(updated);
-      setShowInvite(false);
-    }
-    catch (e) { alert(e.message); }
-  };
   const saveEdit = async () => {
     try {
       const updated = await api.patch(`/missions/${mission.id}`, editData);
       emitMission(updated);
       setEditing(false);
+      notify('Aviso atualizado.');
     }
-    catch (e) { alert(e.message); }
-  };
-
-  const [startModalOpen, setStartModalOpen] = useState(false);
-
-  const closeRegistrations = async () => {
-    setLoading(true);
-    try {
-      const updated = await api.post(`/missions/${mission.id}/close-registrations`, {});
-      emitMission(updated);
-    } catch (e) { alert(e.message); }
-    setLoading(false);
-  };
-
-  const finishCampaign = async () => {
-    if (!confirm('Encerrar a campanha? A sessão será finalizada e o vínculo com o Foundry será removido.')) return;
-    setLoading(true);
-    try {
-      const updated = await api.post(`/missions/${mission.id}/finish`, {});
-      emitMission(updated);
-    } catch (e) { alert(e.message); }
-    setLoading(false);
+    catch (e) { notify(e.message, 'error'); }
   };
 
   const enterFoundry = async () => {
@@ -470,27 +249,25 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
     onUpdate?.({ ...mission, reactions });
   }, [mission, onUpdate]);
 
+  const levelLabel=mission.min_level!=null ? `${mission.min_level}–${mission.max_level ?? 'livre'}` : mission.level;
   const datetime = mission.datetime ? new Date(mission.datetime) : null;
 
   return (
     <>
       <div
-        className={`poster-wrap ${isDimmed ? 'poster-dimmed' : ''} ${expanded ? 'poster-expanded-wrap' : ''}`}
-        style={{ '--rot': `${rotation}deg` }}
+        id={`mission-${mission.id}`}
+        className={`poster-wrap ${isDimmed ? 'poster-dimmed' : ''} ${expanded ? 'poster-expanded-wrap' : ''} ${compact ? 'poster-compact' : ''}`}
+        data-status={mission.status}
       >
-      <div className="poster" onClick={() => !expanded && setExpanded(true)}>
+      <article className="poster" aria-labelledby={`mission-title-${mission.id}`}>
 
         {/* Banner */}
-        <div className="poster-banner" style={{ background: bannerColor }}>
-          <span className="poster-banner-text">{bannerLabel}</span>
+        <div className="poster-banner">
+          <span className="poster-contract-seal" aria-hidden="true"><StatusIcon size={17} /></span><span className="poster-banner-text">{bannerLabel}</span>
         </div>
 
         {/* Participant pins — missions only */}
-        {!isNotice && playerCount > 0 && (
-          participants.length
-            ? <RealParticipantAvatars participants={participants} count={participants.length || playerCount} userJoined={mission.user_joined} />
-            : <ParticipantAvatars count={playerCount} maxPlayers={mission.max_players} userJoined={mission.user_joined} />
-        )}
+        {!isNotice && participants.length > 0 && <RealParticipantAvatars participants={participants.filter(p => p.approvalStatus === 'APPROVED')} count={playerCount + reserveCount} userId={user?.id} />}
         {!isNotice && mission.user_joined && playerCount === 0 && (
           <div className="poster-pin">📌</div>
         )}
@@ -502,8 +279,9 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
 
         {/* Title */}
         <div className="poster-title-block">
-          <h3 className="poster-title">{mission.title}</h3>
-          <div className="poster-creator">— {mission.creator_name} —</div>
+          <h3 className="poster-title" id={`mission-title-${mission.id}`}>{mission.title}</h3>
+          <div className="poster-creator">Criado por {mission.creator_name}</div>
+          {!isNotice && <div className="poster-gm"><Crown size={13} aria-hidden="true" /><span>Narrador: <strong>{mission.gm_name || 'a definir'}</strong></span></div>}
         </div>
 
         {/* Divider */}
@@ -518,21 +296,21 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
                 <span>{format(datetime, "dd/MM 'às' HH:mm", { locale: ptBR })}</span>
               </div>
             )}
-            {mission.level && (
+            {levelLabel && (
               <div className="poster-meta-row poster-meta-level">
-                {/* ⚗ alchemical flask as level icon */}
-                <span className="level-icon">⚗</span>
-                <span>{mission.level}</span>
+                <ShieldCheck size={15} aria-hidden="true" />
+                <span>Níveis {levelLabel}</span>
               </div>
             )}
             <div className="poster-meta-row">
               <Users size={11} />
-              <span style={{ color: playersFull ? '#8b2020' : '#2a6a3a' }}>
+              <span>
                 {playerCount}/{mission.max_players} aventureiros
               </span>
               {mission.max_reserves > 0 && (
-                <span style={{ fontSize: '10px', color: '#6a5a3a' }}>
-                  +{reserveCount}/{mission.max_reserves} reserva
+                <span className="poster-reserve-count">
+                  <Hourglass size={13} aria-hidden="true" />
+                  {reserveCount}/{mission.max_reserves} na espera
                 </span>
               )}
             </div>
@@ -554,11 +332,14 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
           </div>
         )}
 
+        {!expanded && !isNotice && <p className="poster-preview">{mission.description}</p>}
+        <div className="poster-availability"><Badge tone={availability.tone}>{availability.label}</Badge>{!isNotice && <span className="poster-lifecycle">{MISSION_STATUSES[mission.status] || mission.status}</span>}{!isNotice && mission.approval_required && <span className="poster-approval">Inscrição sujeita à aprovação</span>}</div>
+        {!expanded && !isNotice && !mission.user_joined && isOpen && !(playersFull && reservesFull) && <Button variant="primary" className="poster-join" onClick={() => setJoining(true)}>{mission.approval_required ? 'Solicitar inscrição' : playersFull ? 'Entrar na lista de espera' : 'Participar da missão'}</Button>}
         {/* Notice: show truncated description inline */}
         {isNotice && !expanded && (
           <p className="poster-notice-preview">
-            {mission.description.length > 90
-              ? mission.description.slice(0, 90) + '…'
+            {(mission.description || '').length > 90
+              ? (mission.description || '').slice(0, 90) + '…'
               : mission.description}
           </p>
         )}
@@ -575,14 +356,16 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
         <button
           className="poster-toggle"
           onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
-          title={expanded ? 'Recolher' : 'Ver detalhes'}
+          aria-expanded={expanded}
+          aria-controls={`mission-details-${mission.id}`}
+          aria-label={`${expanded ? 'Recolher' : 'Ver detalhes de'} ${mission.title}`}
         >
-          {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          <span>{expanded ? 'Recolher detalhes' : canManage ? 'Ver detalhes e gerenciar' : 'Ver detalhes'}</span>{expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
 
         {/* Expanded detail */}
         {expanded && (
-          <div className="poster-detail animate-in" onClick={e => e.stopPropagation()}>
+          <div id={`mission-details-${mission.id}`} className="poster-detail animate-in">
             <div className="poster-divider"><span>✦</span></div>
 
             {mission.meeting_location && (
@@ -605,7 +388,7 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
                       <div className="poster-participant-copy">
                         <span className="poster-participant-name">{p.characterName || p.playerName}</span>
                         <span className="poster-participant-sub">
-                          {p.playerName}{p.isGM ? ' · GM' : ''}{p.type === 'RESERVE' ? ' · reserva' : ''}
+                          {p.playerName}{p.isGM ? ' · GM' : ''}{p.approvalStatus==='PENDING' ? ' · aguardando aprovação' : p.type === 'RESERVE' ? ' · reserva' : ''}
                         </span>
                       </div>
                       {(p.dead || p.retired || !p.active) && (
@@ -634,409 +417,41 @@ export const MissionPoster = memo(function MissionPoster({ mission: initialMissi
               />
             )}
 
-            <div className="poster-actions">
-
-              {/* Entrar na aventura — jogadores confirmados + GM quando campanha RUNNING */}
-              {!isNotice && isRunning && (isCreator || currentUserIsGM || isUserPlayer) && (
-                <button onClick={enterFoundry} disabled={launchingFoundry} className="poster-btn poster-btn-primary">
-                  <Dice5 size={11} /> Entrar na aventura
-                </button>
-              )}
-
-              {/* Inscrição de jogadores — só quando OPEN */}
-              {!isNotice && isOpen && (
-                mission.user_joined ? (
-                  <>
-                    {isUserReserve && <span className="poster-reserve-badge">🕐 Na Reserva</span>}
-                    <button onClick={leave} disabled={loading} className="poster-btn poster-btn-outline">Sair</button>
-                  </>
-                ) : playersFull && reservesFull ? (
-                  <span className="poster-queue-full">Fila Cheia</span>
-                ) : (
-                  <button onClick={join} disabled={loading} className="poster-btn poster-btn-primary">
-                    {playersFull ? 'Entrar na Reserva' : 'Participar'}
-                  </button>
-                )
-              )}
-
-              {/* Ações do narrador / GM */}
-              {canManage && (
-                <>
-                  {/* OPEN: fechar inscrições + editar + convidar */}
-                  {isOpen && !isNotice && (
-                    <>
-                      <button onClick={closeRegistrations} disabled={loading} className="poster-btn poster-btn-outline">
-                        <X size={11} /> Fechar inscrições
-                      </button>
-                      <button onClick={() => { setEditing(true); setEditData({ title: mission.title, description: mission.description, meetingLocation: mission.meeting_location, level: mission.level, reward: mission.reward }); }} className="poster-btn poster-btn-outline">
-                        <Edit3 size={11} /> Editar
-                      </button>
-                      <button onClick={loadInviteUsers} className="poster-btn poster-btn-outline">
-                        <UserPlus size={11} /> Convidar
-                      </button>
-                    </>
-                  )}
-                  {isOpen && isNotice && (
-                    <button onClick={() => { setEditing(true); setEditData({ title: mission.title, description: mission.description }); }} className="poster-btn poster-btn-outline">
-                      <Edit3 size={11} /> Editar
-                    </button>
-                  )}
-
-                  {/* CLOSED: iniciar campanha (abre modal com campo de código) */}
-                  {isClosed && !isNotice && (
-                    <button onClick={() => setStartModalOpen(true)} disabled={loading} className="poster-btn poster-btn-primary">
-                      <Scroll size={11} /> Iniciar campanha
-                    </button>
-                  )}
-
-                  {/* RUNNING: encerrar campanha */}
-                  {isRunning && !isNotice && (
-                    <button onClick={finishCampaign} disabled={loading} className="poster-btn poster-btn-danger">
-                      <Check size={11} /> Encerrar campanha
-                    </button>
-                  )}
-
-                  {/* Sempre disponível para o criador/GM */}
-                  {!isFinished && !isRunning && (
-                    <button onClick={deleteMission} className="poster-btn poster-btn-danger">
-                      <Trash2 size={11} /> Apagar
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* Modal de início de campanha */}
-            {startModalOpen && (
-              <StartCampaignModal
-                missionId={mission.id}
-                missionTitle={mission.title}
-                onClose={() => setStartModalOpen(false)}
-                onStarted={(result) => {
-                  setStartModalOpen(false);
-                  if (result.mission) emitMission(result.mission);
-                }}
-              />
+            {!isNotice && isRunning && (canManage || (isUserPlayer && mission.user_approval_status==='APPROVED')) && (
+              <button onClick={enterFoundry} disabled={launchingFoundry} className="poster-btn poster-btn-primary">Entrar na aventura</button>
+            )}
+            {!isNotice ? <MissionActions mission={mission} onChange={emitMission} /> : canManage && (
+              <button className="poster-btn poster-btn-outline" onClick={()=>{setEditing(true);setEditData({title:mission.title,description:mission.description});}}>Editar aviso</button>
             )}
 
             {editing && (
               <div className="poster-edit-form">
-                <input value={editData.title || ''} onChange={e => setEditData(p => ({ ...p, title: e.target.value }))} placeholder="Título" />
-                <textarea value={editData.description || ''} onChange={e => setEditData(p => ({ ...p, description: e.target.value }))} placeholder="Descrição" rows={3} />
+                <input aria-label="Título do aviso" value={editData.title || ''} onChange={e => setEditData(p => ({ ...p, title: e.target.value }))} placeholder="Título" />
+                <textarea aria-label="Descrição do aviso" value={editData.description || ''} onChange={e => setEditData(p => ({ ...p, description: e.target.value }))} placeholder="Descrição" rows={3} />
                 {!isNotice && <>
                   <input value={editData.level || ''} onChange={e => setEditData(p => ({ ...p, level: e.target.value }))} placeholder="Nível (ex: 1-5, Iniciante)" />
                   <input value={editData.meetingLocation || ''} onChange={e => setEditData(p => ({ ...p, meetingLocation: e.target.value }))} placeholder="Local / Canal" />
                   <input value={editData.reward || ''} onChange={e => setEditData(p => ({ ...p, reward: e.target.value }))} placeholder="Recompensa" />
                 </>}
-                <div style={{ display: 'flex', gap: '6px' }}>
+                <div className="ui-actions">
                   <button onClick={saveEdit} className="poster-btn poster-btn-primary">Salvar</button>
                   <button onClick={() => setEditing(false)} className="poster-btn poster-btn-outline">Cancelar</button>
                 </div>
               </div>
             )}
 
-            {showInvite && (
-              <div className="poster-invite-list">
-                <div className="poster-invite-label">Convidar jogador:</div>
-                {inviteUsers.filter(u => u.id !== user?.id).map(u => {
-                  const character = inviteCharacter(u);
-                  const avatar = inviteAvatar(u, character);
-                  const displayName = inviteDisplayName(u);
-                  const alreadyParticipant = participants.some(p => p.userId === u.id);
-
-                  return (
-                    <div key={u.id} className="poster-invite-row">
-                      <div className="poster-invite-player">
-                        <div className="poster-invite-avatar">
-                          {avatar
-                            ? <img src={foundryAsset(avatar)} alt={displayName} />
-                            : <span>{displayName[0]}</span>}
-                        </div>
-                        <div className="poster-invite-copy">
-                          <span className="poster-invite-name">{displayName}</span>
-                          <span className="poster-invite-character">
-                            {character ? character.name : 'Sem personagem vinculado'}
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => invite(u.id)}
-                        className="poster-btn poster-btn-primary"
-                        disabled={alreadyParticipant}
-                      >
-                        {alreadyParticipant ? 'Já participa' : 'Convidar'}
-                      </button>
-                    </div>
-                  );
-                })}
-                <button onClick={() => setShowInvite(false)} className="poster-btn poster-btn-outline" style={{ marginTop: '4px' }}>Fechar</button>
-              </div>
-            )}
           </div>
         )}
 
-        {/* Corner aging */}
-        <div className="poster-corner poster-corner-tl" />
-        <div className="poster-corner poster-corner-tr" />
-        <div className="poster-corner poster-corner-bl" />
-        <div className="poster-corner poster-corner-br" />
-      </div>
 
-      <style>{`
-        /* ── Wrapper ─────────────────────────────────────────── */
-        .poster-wrap {
-          transform: rotate(var(--rot));
-          transition: transform 0.25s cubic-bezier(.22,.68,0,1.4), filter 0.2s;
-          transform-origin: center bottom;
-          cursor: pointer;
-          position: relative;
-        }
-        .poster-wrap:hover { transform: rotate(0deg) scale(1.03); z-index: 10; }
-        .poster-expanded-wrap { transform: rotate(0deg) !important; z-index: 10; cursor: default; }
-        .poster-dimmed { filter: grayscale(0.75) brightness(0.7); }
+      </article>
 
-        /* ── Parchment ───────────────────────────────────────── */
-        .poster {
-          position: relative;
-          background:
-            url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E"),
-            linear-gradient(170deg, #f9eecb 0%, #f2dfa0 25%, #e8ca78 60%, #d9b356 100%);
-          border-radius: 1px;
-          padding: 18px 16px 14px;
-          box-shadow: 0 6px 24px rgba(0,0,0,0.55), 0 2px 4px rgba(0,0,0,0.35), inset 0 0 40px rgba(120,70,10,0.12);
-          outline: 2px solid #7a5c18;
-          outline-offset: -5px;
-          overflow: hidden;
-          font-family: var(--font-display);
-          color: #2a1a06;
-          min-width: 0;
-        }
-        .poster::before {
-          content: '';
-          position: absolute; inset: 0;
-          background: radial-gradient(ellipse at center, transparent 45%, rgba(70,35,5,0.4) 100%);
-          pointer-events: none; z-index: 1;
-        }
 
-        /* ── Banner ──────────────────────────────────────────── */
-        .poster-banner {
-          text-align: center;
-          margin: -18px -16px 14px;
-          padding: 7px 16px;
-          border-bottom: 2px solid rgba(0,0,0,0.4);
-          position: relative; z-index: 2;
-        }
-        .poster-banner-text {
-          font-family: var(--font-display);
-          font-size: 12px; font-weight: 900;
-          letter-spacing: 6px;
-          color: #f0c890;
-          text-shadow: 0 1px 3px rgba(0,0,0,0.6);
-        }
-
-        /* ── Avatars / notice icon ───────────────────────────── */
-        .poster-avatars {
-          display: flex; justify-content: center;
-          margin-bottom: 10px; position: relative; z-index: 2;
-        }
-        .poster-avatar {
-          width: 26px; height: 26px; border-radius: 50%;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 11px; position: relative;
-          box-shadow: 0 1px 5px rgba(0,0,0,0.45);
-          overflow: hidden;
-        }
-        .poster-avatar-img { width: 100%; height: 100%; object-fit: cover; }
-        .poster-avatar-gm { box-shadow: 0 0 0 1px #c9a84c, 0 1px 5px rgba(0,0,0,0.45); }
-        .poster-avatar-muted { filter: grayscale(0.9); opacity: 0.58; }
-        .poster-avatar-overflow { background: #3a2508; color: #e8c860; font-size: 9px; font-weight: 700; }
-        .poster-pin { text-align: center; font-size: 18px; margin-bottom: 8px; position: relative; z-index: 2; }
-        .poster-notice-icon { text-align: center; font-size: 22px; margin-bottom: 8px; position: relative; z-index: 2; }
-
-        /* ── Title ───────────────────────────────────────────── */
-        .poster-title-block { text-align: center; position: relative; z-index: 2; margin-bottom: 10px; }
-        .poster-title { font-size: 16px; font-weight: 900; color: #180a00; letter-spacing: 0.5px; line-height: 1.25; text-shadow: 0 1px 0 rgba(255,255,255,0.25); word-break: break-word; }
-        .poster-creator { font-size: 10px; color: #6a4a1a; letter-spacing: 1.5px; margin-top: 4px; font-style: italic; font-family: var(--font-body); }
-
-        /* ── Divider ─────────────────────────────────────────── */
-        .poster-divider { text-align: center; color: #7a5c18; font-size: 12px; margin: 6px 0; display: flex; align-items: center; gap: 6px; position: relative; z-index: 2; }
-        .poster-divider::before, .poster-divider::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, #8b6820, transparent); }
-
-        /* ── Meta rows ───────────────────────────────────────── */
-        .poster-meta { display: flex; flex-direction: column; gap: 5px; position: relative; z-index: 2; }
-        .poster-meta-row { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #3a2010; font-family: var(--font-body); }
-        .poster-session-open { color: #1f5f35; font-weight: 700; }
-        .poster-meta-level { font-weight: 700; color: #5a3010; letter-spacing: 0.3px; }
-        .level-icon { font-size: 12px; line-height: 1; }
-        .poster-reward { font-weight: 600; color: #6a3a08; }
-
-        /* ── Notice preview ──────────────────────────────────── */
-        .poster-notice-preview {
-          font-size: 11px; font-family: var(--font-body);
-          color: #3a2010; line-height: 1.55;
-          margin-bottom: 6px; position: relative; z-index: 2;
-          font-style: italic;
-        }
-        .poster-poll-hint {
-          font-size: 10px; color: #5a4010;
-          background: rgba(139,90,20,0.1);
-          border: 1px dashed #9a7820;
-          border-radius: 2px; padding: 3px 6px;
-          margin-bottom: 6px; position: relative; z-index: 2;
-          font-family: var(--font-body);
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-
-        /* ── Reaction bar ────────────────────────────────────── */
-        .reaction-bar {
-          display: flex; flex-wrap: wrap; gap: 4px;
-          align-items: center;
-          margin-top: 8px; padding-top: 8px;
-          border-top: 1px dashed rgba(139,90,20,0.3);
-          position: relative; z-index: 2;
-        }
-        .reaction-pill {
-          display: flex; align-items: center; gap: 3px;
-          padding: 2px 7px; border-radius: 10px;
-          background: rgba(139,90,20,0.12);
-          border: 1px solid rgba(139,90,20,0.25);
-          font-size: 13px; cursor: pointer;
-          transition: all 0.15s; line-height: 1;
-        }
-        .reaction-pill:hover { background: rgba(139,90,20,0.25); border-color: rgba(139,90,20,0.5); }
-        .reaction-mine { background: rgba(139,90,20,0.28); border-color: #9a7820; }
-        .reaction-count { font-size: 10px; font-family: var(--font-body); color: #5a3a10; font-weight: 700; }
-        .reaction-picker-wrap { position: relative; }
-        .reaction-add-btn {
-          width: 24px; height: 24px; border-radius: 50%;
-          background: rgba(139,90,20,0.1); border: 1px dashed rgba(139,90,20,0.4);
-          color: #6a4a20; font-size: 14px; font-weight: 700;
-          display: flex; align-items: center; justify-content: center;
-          cursor: pointer; transition: all 0.15s; line-height: 1;
-        }
-        .reaction-add-btn:hover { background: rgba(139,90,20,0.25); }
-        .reaction-picker {
-          position: absolute; bottom: 28px; left: 0;
-          background: #f2dfa0;
-          border: 1px solid #9a7820; border-radius: 6px;
-          padding: 6px; display: flex; gap: 4px; flex-wrap: wrap;
-          box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-          z-index: 20; min-width: 120px;
-        }
-        .reaction-option {
-          font-size: 18px; background: none; border: none; cursor: pointer;
-          padding: 3px; border-radius: 4px; transition: background 0.1s;
-          line-height: 1;
-        }
-        .reaction-option:hover { background: rgba(139,90,20,0.2); }
-
-        /* ── Inline poll ─────────────────────────────────────── */
-        .inline-poll {
-          margin-bottom: 10px;
-          padding: 8px;
-          background: rgba(139,90,20,0.07);
-          border: 1px dashed #9a7820;
-          border-radius: 2px;
-          position: relative; z-index: 2;
-        }
-        .inline-poll-question {
-          font-size: 11px; font-weight: 700; color: #3a2010;
-          font-family: var(--font-body); margin-bottom: 8px;
-        }
-        .inline-poll-options { display: flex; flex-direction: column; gap: 5px; }
-        .poll-option {
-          position: relative; overflow: hidden;
-          text-align: left; padding: 5px 8px;
-          border-radius: 2px;
-          border: 1px solid rgba(139,90,20,0.25);
-          background: rgba(255,255,255,0.25);
-          cursor: pointer; transition: border-color 0.15s;
-          display: flex; align-items: center; justify-content: space-between;
-          min-height: 28px;
-        }
-        .poll-option:hover { border-color: #9a7820; }
-        .poll-option-voted { border-color: #7a5010; background: rgba(139,90,20,0.15); }
-        .poll-option-bar {
-          position: absolute; left: 0; top: 0; height: 100%;
-          background: rgba(139,90,20,0.15);
-          transition: width 0.4s ease;
-          pointer-events: none;
-        }
-        .poll-option-text { font-size: 11px; font-family: var(--font-body); color: #2a1a08; position: relative; z-index: 1; }
-        .poll-option-pct { font-size: 10px; font-family: var(--font-body); color: #6a4a20; font-weight: 700; position: relative; z-index: 1; }
-        .inline-poll-total { font-size: 10px; color: #7a5a2a; font-family: var(--font-body); text-align: right; margin-top: 5px; }
-
-        /* ── Toggle ──────────────────────────────────────────── */
-        .poster-toggle { display: flex; align-items: center; justify-content: center; width: 100%; margin-top: 6px; background: none; border: none; color: #6a4a20; position: relative; z-index: 2; opacity: 0.65; transition: opacity 0.15s; }
-        .poster-toggle:hover { opacity: 1; }
-
-        /* ── Expanded detail ─────────────────────────────────── */
-        .poster-detail { position: relative; z-index: 2; border-top: 1px dashed #9a7830; padding-top: 10px; margin-top: 4px; }
-        .poster-location { font-size: 11px; font-family: var(--font-body); color: #5a3820; font-style: italic; margin-bottom: 8px; padding: 4px 6px; background: rgba(139,90,20,0.07); border-radius: 2px; }
-        .poster-description { font-size: 12px; font-family: var(--font-body); color: #2a1a08; line-height: 1.65; margin-bottom: 10px; font-style: italic; }
-        .poster-participants-panel { margin-bottom: 10px; padding: 8px; background: rgba(80,45,12,0.08); border: 1px dashed #9a7820; border-radius: 2px; }
-        .poster-panel-title { font-size: 10px; color: #5a3a10; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
-        .poster-participant-list { display: grid; gap: 5px; }
-        .poster-participant-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 7px; align-items: center; min-width: 0; }
-        .poster-participant-token { width: 28px; height: 28px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #5a3010; color: #f1d890; font-size: 11px; font-weight: 800; box-shadow: 0 1px 5px rgba(0,0,0,0.35); }
-        .poster-participant-token img { width: 100%; height: 100%; object-fit: cover; }
-        .poster-participant-copy { min-width: 0; display: flex; flex-direction: column; }
-        .poster-participant-name { font-size: 12px; color: #251404; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .poster-participant-sub { font-size: 10px; color: #6a4a20; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .poster-participant-gm .poster-participant-token { box-shadow: 0 0 0 1px #c9a84c, 0 1px 5px rgba(0,0,0,0.35); }
-        .poster-participant-state { font-size: 9px; color: #7a2020; border: 1px solid rgba(122,32,32,0.35); border-radius: 2px; padding: 1px 4px; }
-
-        /* ── Stars ───────────────────────────────────────────── */
-        .poster-stars { display: flex; align-items: center; justify-content: center; gap: 2px; margin-bottom: 8px; }
-        .star-btn { background: none; border: none; font-size: 15px; color: #9a7820; cursor: pointer; padding: 1px; transition: color 0.1s; }
-        .star-btn.star-lit, .star-btn:hover { color: #c9880a; }
-        .poster-avg-rating { font-size: 12px; color: #8b5a10; margin-left: 4px; font-family: var(--font-body); }
-
-        /* ── Action buttons ──────────────────────────────────── */
-        .poster-actions { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; margin-bottom: 8px; }
-        .poster-queue-full { font-size: 10px; color: #8b2020; font-weight: 700; letter-spacing: 1px; font-family: var(--font-display); }
-        .poster-btn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 2px; font-family: var(--font-display); font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; transition: all 0.15s; }
-        .poster-btn-primary { background: #6b1010; color: #f5d0a0; border: 1px solid #4a0808; }
-        .poster-btn-primary:hover:not(:disabled) { background: #8b2020; }
-        .poster-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-        .poster-btn-outline { background: rgba(139,90,20,0.1); color: #4a2a08; border: 1px solid #9a7820; }
-        .poster-btn-outline:hover { background: rgba(139,90,20,0.22); }
-        .poster-btn-danger { background: transparent; color: #7a2020; border: 1px solid #6a2020; }
-        .poster-btn-danger:hover { background: rgba(139,32,32,0.15); }
-
-        /* ── Edit form ───────────────────────────────────────── */
-        .poster-edit-form { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding: 8px; background: rgba(139,90,20,0.07); border: 1px dashed #9a7820; border-radius: 2px; }
-        .poster-edit-form input, .poster-edit-form textarea { background: rgba(255,255,255,0.38); border: 1px solid #9a7820; color: #2a1a08; font-size: 11px; padding: 5px 8px; border-radius: 2px; }
-        .poster-edit-form input:focus, .poster-edit-form textarea:focus { outline: none; border-color: #6b4010; box-shadow: none; }
-
-        /* ── Invite list ─────────────────────────────────────── */
-        .poster-invite-list { margin-top: 8px; padding: 8px; background: rgba(139,90,20,0.07); border: 1px dashed #9a7820; border-radius: 2px; }
-        .poster-invite-label { font-size: 10px; color: #6a4a20; letter-spacing: 0.5px; margin-bottom: 6px; text-transform: uppercase; }
-        .poster-invite-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid rgba(139,90,20,0.18); font-size: 11px; font-family: var(--font-body); color: #2a1a08; }
-        .poster-invite-player { display: flex; align-items: center; gap: 7px; min-width: 0; }
-        .poster-invite-avatar { width: 28px; height: 28px; flex: 0 0 28px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #5a3010; color: #f1d890; font-size: 11px; font-weight: 800; box-shadow: 0 1px 5px rgba(0,0,0,0.28); }
-        .poster-invite-avatar img { width: 100%; height: 100%; object-fit: cover; }
-        .poster-invite-copy { min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
-        .poster-invite-name { color: #251404; font-size: 11px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .poster-invite-character { color: #6a4a20; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-        /* ── Corner aging ────────────────────────────────────── */
-        .poster-corner { position: absolute; width: 16px; height: 16px; pointer-events: none; z-index: 3; }
-        .poster-corner-tl { top:0; left:0; background: radial-gradient(circle at 0% 0%, transparent 55%, rgba(60,30,5,0.45) 100%); }
-        .poster-corner-tr { top:0; right:0; background: radial-gradient(circle at 100% 0%, transparent 55%, rgba(60,30,5,0.45) 100%); }
-        .poster-corner-bl { bottom:0; left:0; background: radial-gradient(circle at 0% 100%, transparent 55%, rgba(60,30,5,0.45) 100%); }
-        .poster-corner-br { bottom:0; right:0; background: radial-gradient(circle at 100% 100%, transparent 55%, rgba(60,30,5,0.45) 100%); }
-      `}</style>
     </div>
-
-    {showJoinModal && (
-      <JoinMissionModal
-        mission={mission}
-        playersFull={playersFull}
-        onClose={() => setShowJoinModal(false)}
-        onJoined={handleJoined}
-      />
-    )}
+    {joining && <JoinMissionModal mission={mission} playersFull={playersFull} onClose={() => setJoining(false)} onJoined={result => {
+      if (result.mission) emitMission(result.mission); else onUpdate?.();
+      notify(mission.approval_required ? 'Inscrição enviada para aprovação.' : 'Inscrição confirmada.');
+    }} />}
   </>
   );
 });

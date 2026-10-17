@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../../lib/api.js';
 
 const ATTRIBUTE_LABELS = {
@@ -30,7 +30,7 @@ export default function SideQuestDetail({ activityId, onBack, onUpdate }) {
   const [reportData, setReportData] = useState(null);
   const [loadingReport, setLoadingReport] = useState(false);
 
-  const fetchDetails = async () => {
+  const fetchDetails = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -42,11 +42,11 @@ export default function SideQuestDetail({ activityId, onBack, onUpdate }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activityId]);
 
   useEffect(() => {
     fetchDetails();
-  }, [activityId]);
+  }, [fetchDetails]);
 
   const handleCancel = async () => {
     if (!window.confirm('Tem certeza que deseja CANCELAR esta atividade?')) return;

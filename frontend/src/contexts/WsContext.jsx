@@ -26,7 +26,8 @@ export function WsProvider({ children }) {
     };
 
     ws.onclose = () => {
-      if (wsRef.current === ws) wsRef.current = null;
+      if (wsRef.current !== ws) return;
+      wsRef.current = null;
       setConnected(false);
       if (deadRef.current) return;
       // Exponential backoff: 1s, 2s, 4s, 8s … cap at 30s
@@ -57,11 +58,13 @@ export function WsProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    deadRef.current = false;
     connect();
     return () => {
       deadRef.current = true;              // prevent reconnect on unmount
       clearTimeout(timerRef.current);
       wsRef.current?.close();
+      wsRef.current = null;
     };
   }, [connect]);
 

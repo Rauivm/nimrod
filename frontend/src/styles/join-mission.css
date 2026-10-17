@@ -1,0 +1,19 @@
+.jm-content { display: grid; gap: var(--space-5); }
+.jm-mission-name { color: var(--gold-bright); font: 600 var(--text-lg)/1.4 var(--font-display); }
+.jm-body { display: grid; gap: var(--space-3); }
+.jm-label, .jm-loading { font-size: var(--text-sm); color: var(--text-muted); }
+.jm-options { display: grid; gap: var(--space-3); }
+.jm-option { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); text-align: left; color: var(--text); background: var(--bg-field); border: 1px solid var(--border); border-radius: var(--radius); }
+.jm-option-selected { border-color: var(--gold); background: var(--bg-soft); }
+.jm-option-token { width: 3rem; height: 3rem; border-radius: 50%; overflow: hidden; display: grid; place-items: center; background: var(--bg-card); flex-shrink: 0; }
+.jm-token-img { width: 100%; height: 100%; object-fit: cover; }
+.jm-option-info { flex: 1; min-width: 0; display: grid; gap: var(--space-1); }
+.jm-option-name { font-size: var(--text-sm); font-weight: 600; overflow-wrap: anywhere; }
+.jm-option-sub { color: var(--text-muted); font-size: var(--text-xs); }
+.jm-radio { width: 1.25rem; height: 1.25rem; border: 1px solid var(--border-bright); border-radius: 50%; flex-shrink: 0; }
+.jm-radio-on { border: .35rem solid var(--gold); }
+.jm-no-chars { display: grid; gap: var(--space-2); color: var(--text-muted); font-size: var(--text-sm); }
+.jm-no-chars-hint { font-size: var(--text-xs); }
+.jm-footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-3); border-top: 1px solid var(--border); padding-top: var(--space-5); }
+.jm-btn-cancel, .jm-btn-confirm { min-height: 2.75rem; padding: var(--space-2) var(--space-4); border-radius: var(--radius); border: 1px solid var(--border-bright); background: var(--bg-field); color: var(--text); font-size: var(--text-sm); }
+.jm-btn-confirm { background: var(--gold); color: var(--bg); border-color: var(--gold); font-weight: 600; }

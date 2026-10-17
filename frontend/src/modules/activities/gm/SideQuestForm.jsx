@@ -9,7 +9,7 @@ export default function SideQuestForm({ onCreated, onCancel }) {
   const [goal, setGoal] = useState(50);
   const [maxParticipants, setMaxParticipants] = useState(0);
   const [executionMode, setExecutionMode] = useState('dice');
-  
+
   // Rules and formulas fields
   const [attribute, setAttribute] = useState('str');
   const [rewardFormula, setRewardFormula] = useState('proportional');
@@ -84,27 +84,27 @@ export default function SideQuestForm({ onCreated, onCancel }) {
       <div style={{ marginBottom: '16px' }}>
         <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
           Título
-        </label>
+
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           required
           placeholder="Ex: Escolta do Mercador"
-        />
+        /></label>
       </div>
 
       {/* Description */}
       <div style={{ marginBottom: '16px' }}>
         <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
           Descrição
-        </label>
+
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           required
           placeholder="Descreva a atividade, seus desafios e objetivos..."
-        />
+        /></label>
       </div>
 
       {/* Dates */}
@@ -112,24 +112,24 @@ export default function SideQuestForm({ onCreated, onCancel }) {
         <div>
           <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
             Data de Início
-          </label>
+
           <input
             type="datetime-local"
             value={startsAt}
             onChange={(e) => setStartsAt(e.target.value)}
             required
-          />
+          /></label>
         </div>
         <div>
           <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
             Data de Término
-          </label>
+
           <input
             type="datetime-local"
             value={endsAt}
             onChange={(e) => setEndsAt(e.target.value)}
             required
-          />
+          /></label>
         </div>
       </div>
 
@@ -138,26 +138,26 @@ export default function SideQuestForm({ onCreated, onCancel }) {
         <div>
           <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
             Meta Total (Goal)
-          </label>
+
           <input
             type="number"
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             required
             min={1}
-          />
+          /></label>
         </div>
         <div>
           <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
             Máx. Participantes (0 = Sem Limite)
-          </label>
+
           <input
             type="number"
             value={maxParticipants}
             onChange={(e) => setMaxParticipants(e.target.value)}
             required
             min={0}
-          />
+          /></label>
         </div>
       </div>
 
@@ -166,12 +166,12 @@ export default function SideQuestForm({ onCreated, onCancel }) {
         <h4 style={{ fontFamily: 'var(--font-display)', fontSize: '14px', color: 'var(--gold)', marginBottom: '12px', textTransform: 'uppercase' }}>
           Configuração de Regras
         </h4>
-        
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
           <div>
             <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
               Atributo Testado
-            </label>
+
             <select value={attribute} onChange={(e) => setAttribute(e.target.value)}>
               <option value="str">Força (FOR)</option>
               <option value="dex">Destreza (DES)</option>
@@ -179,16 +179,16 @@ export default function SideQuestForm({ onCreated, onCancel }) {
               <option value="int">Inteligência (INT)</option>
               <option value="wis">Sabedoria (SAB)</option>
               <option value="cha">Carisma (CAR)</option>
-            </select>
+            </select></label>
           </div>
           <div>
             <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
               Fórmula de Recompensas
-            </label>
+
             <select value={rewardFormula} onChange={(e) => setRewardFormula(e.target.value)}>
               <option value="proportional">Proporcional (Roll/20)</option>
               <option value="flat">Fixa (Flat)</option>
-            </select>
+            </select></label>
           </div>
         </div>
 
@@ -196,26 +196,26 @@ export default function SideQuestForm({ onCreated, onCancel }) {
           <div>
             <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
               XP Máximo
-            </label>
+
             <input
               type="number"
               value={xpMax}
               onChange={(e) => setXpMax(e.target.value)}
               required
               min={0}
-            />
+            /></label>
           </div>
           <div>
             <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
               Gold Máximo
-            </label>
+
             <input
               type="number"
               value={goldMax}
               onChange={(e) => setGoldMax(e.target.value)}
               required
               min={0}
-            />
+            /></label>
           </div>
         </div>
       </div>
@@ -235,7 +235,7 @@ export default function SideQuestForm({ onCreated, onCancel }) {
         >
           Cancelar
         </button>
-        
+
         <button
           type="submit"
           disabled={loading}

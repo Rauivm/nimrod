@@ -1,3 +1,4 @@
+import { Modal } from './ui.jsx';
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api.js';
 import { X, Link, Plus, Unlink, Users } from 'lucide-react';
@@ -108,7 +109,7 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
   ];
 
   return (
-    <div className="lc-overlay" role="presentation">
+    <Modal title="Gerenciar personagens" showHeader={false} onClose={onClose} dismissible={!submitting}>
       <div className="lc-modal animate-in">
 
         <div className="lc-header">
@@ -247,21 +248,21 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
           <div className="lc-content">
             <div className="lc-form">
               <div className="lc-form-group">
-                <label>Nome *</label>
-                <input value={name} onChange={e => setName(e.target.value)} placeholder="Nome do personagem" maxLength={100} />
+                <label>Nome *
+                <input value={name} onChange={e => setName(e.target.value)} placeholder="Nome do personagem" maxLength={100} /></label>
               </div>
               <div className="lc-form-row">
                 <div className="lc-form-group">
-                  <label>Nível</label>
-                  <input type="number" min={1} max={20} value={level} onChange={e => setLevel(parseInt(e.target.value) || 1)} />
+                  <label>Nível
+                  <input type="number" min={1} max={20} value={level} onChange={e => setLevel(parseInt(e.target.value) || 1)} /></label>
                 </div>
                 <div className="lc-form-group">
-                  <label>XP atual</label>
-                  <input type="number" min={0} value={xp} onChange={e => setXp(parseInt(e.target.value) || 0)} />
+                  <label>XP atual
+                  <input type="number" min={0} value={xp} onChange={e => setXp(parseInt(e.target.value) || 0)} /></label>
                 </div>
                 <div className="lc-form-group">
-                  <label>XP próx. nível</label>
-                  <input type="number" min={1} value={xpNext} onChange={e => setXpNext(parseInt(e.target.value) || 300)} />
+                  <label>XP próx. nível
+                  <input type="number" min={1} value={xpNext} onChange={e => setXpNext(parseInt(e.target.value) || 300)} /></label>
                 </div>
               </div>
               <button
@@ -313,6 +314,6 @@ export default function LinkCharacterModal({ targetUserId, onClose, onLinked }) 
         .lc-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         @media (max-width: 480px) { .lc-form-row { grid-template-columns: 1fr; } }
       `}</style>
-    </div>
+    </Modal>
   );
 }

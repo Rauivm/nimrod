@@ -1,228 +1,101 @@
-import { Outlet, NavLink } from 'react-router-dom';
-import { useState } from 'react';
-import { useAuth, roleLabel, isGM, isGMPrincipal } from '../contexts/AuthContext.jsx';
+import { Outlet, NavLink, Link, useLocation } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useAuth, roleLabel, isGM } from '../contexts/AuthContext.jsx';
 import { useWs } from '../contexts/WsContext.jsx';
 import { useExperience } from '../contexts/ExperienceContext.jsx';
-import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil, UserCircle, BookOpen, Calendar, Compass, Gamepad2 } from 'lucide-react';
+import { Sword, Skull, Map, Scroll, Wifi, WifiOff, ExternalLink, Pencil, UserCircle, BookOpen, Calendar, Compass, Gamepad2, Menu, X, Bell, Shield } from 'lucide-react';
 import EditDisplayNameModal from './EditDisplayNameModal.jsx';
-
 import { useFoundryLaunch } from '../hooks/useFoundryLaunch.js';
+import { Button, useToast } from './ui.jsx';
+import BrandSeal from './BrandSeal.jsx';
+import ElementThemePicker, { ElementIcon } from './ElementThemePicker.jsx';
+import { useElementTheme } from '../contexts/ElementThemeContext.jsx';
+import '../styles/layout.css';
 
-function FoundryButton({ user }) {
-  const { launch, loading } = useFoundryLaunch();
-  const label = isGM(user) ? 'Iniciar Aventura' : 'Entrar na Aventura';
-
-  return (
-    <button onClick={launch} disabled={loading} className="foundry-btn">
-      <Sword size={15} strokeWidth={2.5} />
-      <span>{loading ? 'Abrindo…' : label}</span>
-      <ExternalLink size={11} style={{ opacity: 0.6 }} />
-    </button>
-  );
-}
-
-function UserChip({ user }) {
-  const [showEdit, setShowEdit] = useState(false);
-
-  if (!user) return null;
-
-  return (
-    <>
-      <div className="user-chip">
-        <button
-          className="user-chip-name"
-          onClick={() => setShowEdit(true)}
-          title="Editar nome de exibição"
-        >
-          {user.displayName || user.name}
-          <Pencil size={10} className="chip-edit-icon" />
-        </button>
-        <span className="role-label">
-          {roleLabel(user.role)}
-        </span>
-        {isGM(user) && <span className="gm-badge">GM</span>}
-      </div>
-
-      {showEdit && <EditDisplayNameModal onClose={() => setShowEdit(false)} />}
-    </>
-  );
-}
+const groups = [
+  { title: 'Sua jornada', items: [
+    { to: '/', label: 'Comunidade', icon: Scroll, mode: 'classic', end: true },
+    { to: '/missions', label: 'Quadro de Avisos', icon: Sword },
+    { to: '/sidequests', label: 'Side Quests', icon: Compass },
+    { to: '/lobby', label: 'Taverna · Modo Jogo', icon: Gamepad2, mode: 'game' },
+  ] },
+  { title: 'O mundo', items: [
+    { to: '/calendar', label: 'Calendário', icon: Calendar },
+    { to: '/maps', label: 'Mapas', icon: Map },
+    { to: '/cemetery', label: 'Cemitério', icon: Skull },
+    { to: '/patch-notes', label: 'Atualizações', icon: Bell },
+  ] },
+  { title: 'Sua conta', items: [
+    { to: '/profile', label: 'Perfil e personagens', icon: UserCircle },
+    { to: '/foundry-connect', label: 'Conexão com Foundry', icon: Shield },
+    { to: '/gm/sessions', label: 'Sessões', icon: BookOpen, gm: true },
+  ] },
+];
 
 export default function Layout() {
   const { user } = useAuth();
   const { connected } = useWs();
   const { chooseMode } = useExperience();
-
-  return (
-    <div className="layout">
-      <header className="site-header">
-        <div className="header-inner">
-          <div className="header-brand">
-            <span className="brand-sigil">⚔</span>
-            <span className="brand-name">NIMROD</span>
-            <span className="brand-sub">Foundry VTT</span>
-          </div>
-
-          <nav className="main-nav">
-            <NavLink to="/lobby" aria-label="Modo Jogo" title="Taverna multiplayer" onClick={() => chooseMode('game')} className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Gamepad2 size={14} /><span>Modo Jogo</span>
-            </NavLink>
-            <NavLink to="/" end aria-label="Modo Clássico" onClick={() => chooseMode('classic')} className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Scroll size={14} /><span>Modo Clássico</span>
-            </NavLink>
-            <NavLink to="/missions" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Sword size={14} /><span>Missões</span>
-            </NavLink>
-            <NavLink to="/sidequests" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Compass size={14} /><span>Side Quests</span>
-            </NavLink>
-            <NavLink to="/cemetery" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Skull size={14} /><span>Cemitério</span>
-            </NavLink>
-            <NavLink to="/maps" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Map size={14} /><span>Mapas</span>
-            </NavLink>
-            <NavLink to="/calendar" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <Calendar size={14} /><span>Calendário</span>
-            </NavLink>
-            <NavLink to="/profile" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              <UserCircle size={14} /><span>Perfil</span>
-            </NavLink>
-            <NavLink
-              to="/patch-notes" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-              Atualizações
-            </NavLink>
-            {(isGM(user)) && (
-              <NavLink to="/gm/sessions" className={({isActive}) => isActive ? 'nav-link active' : 'nav-link'}>
-                <BookOpen size={14} /><span>Sessões</span>
-              </NavLink>
-            )}
-          </nav>
-
-          <div className="header-right">
-            <div className={`ws-indicator ${connected ? 'connected' : 'disconnected'}`} title={connected ? 'Conectado' : 'Reconectando...'}>
-              {connected ? <Wifi size={12} /> : <WifiOff size={12} />}
-            </div>
-            <FoundryButton user={user} />
-            <UserChip user={user} />
-          </div>
-        </div>
-      </header>
-
-      <main className="site-main">
-        <Outlet />
-      </main>
-
-      <style>{`
-        .layout { min-height: 100vh; display: flex; flex-direction: column; }
-
-        .site-header {
-          position: sticky; top: 0; z-index: 100;
-          background: rgba(10,9,5,0.95);
-          backdrop-filter: blur(12px);
-          border-bottom: 1px solid var(--border);
-          box-shadow: 0 1px 20px rgba(0,0,0,0.5);
-        }
-        .header-inner {
-          max-width: 1200px; margin: 0 auto;
-          padding: 0 24px; height: 56px;
-          display: flex; align-items: center; gap: 24px;
-        }
-        .header-brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-        .brand-sigil { color: var(--gold); font-size: 18px; }
-        .brand-name {
-          font-family: var(--font-display);
-          font-size: 16px; font-weight: 700;
-          color: var(--gold); letter-spacing: 3px;
-        }
-        .brand-sub {
-          font-size: 10px; color: var(--text-faint);
-          letter-spacing: 1px; text-transform: uppercase;
-          padding: 2px 6px; border: 1px solid var(--border); border-radius: 2px;
-        }
-
-        .main-nav { display: flex; gap: 4px; flex: 1; }
-        .nav-link {
-          display: flex; align-items: center; gap: 6px;
-          padding: 6px 12px; border-radius: var(--radius);
-          color: var(--text-muted); font-size: 13px;
-          letter-spacing: 0.5px; text-transform: uppercase; transition: all 0.15s;
-        }
-        .nav-link:hover { color: var(--text); background: var(--bg-card); }
-        .nav-link.active { color: var(--gold); background: rgba(201,168,76,0.08); }
-
-        .header-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
-
-        .ws-indicator { width: 8px; height: 8px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
-        .ws-indicator.connected { color: var(--emerald-bright); }
-        .ws-indicator.disconnected { color: var(--crimson-bright); animation: pulse 1s infinite; }
-
-        .foundry-btn {
-          display: flex; align-items: center; gap: 7px;
-          padding: 7px 16px;
-          background: linear-gradient(135deg, #8b2020 0%, #5a1010 100%);
-          border: 1px solid rgba(196,48,48,0.4); border-radius: var(--radius);
-          color: #f0d8d8; font-family: var(--font-display);
-          font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
-          box-shadow: 0 2px 12px rgba(139,32,32,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
-          transition: all 0.2s;
-        }
-        .foundry-btn:hover {
-          background: linear-gradient(135deg, #a82828 0%, #7a1818 100%);
-          box-shadow: 0 4px 20px rgba(139,32,32,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
-          transform: translateY(-1px);
-        }
-        .foundry-btn:active { transform: translateY(0); }
-
-        /* ── User chip ───────────────────────────────────────────────────── */
-        .user-chip {
-          display: flex; align-items: center; gap: 6px;
-          padding: 4px 10px;
-          background: var(--bg-card);
-          border: 1px solid var(--border); border-radius: var(--radius);
-          font-size: 13px;
-        }
-        .user-chip-name {
-          display: flex; align-items: center; gap: 5px;
-          background: none; color: var(--text);
-          max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-          font-size: 13px; padding: 0;
-          border-radius: 2px; transition: color 0.15s;
-        }
-        .user-chip-name:hover { color: var(--gold); }
-        .chip-edit-icon { opacity: 0; transition: opacity 0.15s; flex-shrink: 0; }
-        .user-chip-name:hover .chip-edit-icon { opacity: 0.7; }
-
-        .role-label {
-          font-family: var(--font-display);
-          font-size: 9px; font-weight: 700;
-          color: var(--text-muted); letter-spacing: 0.8px;
-          text-transform: uppercase;
-        }
-        .gm-badge {
-          font-family: var(--font-display);
-          font-size: 9px; font-weight: 700;
-          color: var(--gold); letter-spacing: 1px;
-          padding: 1px 5px;
-          background: rgba(201,168,76,0.1);
-          border: 1px solid var(--gold-dim); border-radius: 2px;
-        }
-
-        .site-main { flex: 1; max-width: 1200px; margin: 0 auto; width: 100%; padding: 24px; }
-
-        @media (max-width: 768px) {
-          .brand-sub, .role-label { display: none; }
-          .nav-link span { display: none; }
-          .header-inner { gap: 8px; padding: 0 10px; overflow-x: auto; }
-          .brand-name { font-size: 14px; letter-spacing: 2px; }
-          .main-nav { flex: 0 0 auto; }
-          .nav-link { padding: 8px; }
-          .header-right { gap: 8px; }
-          .foundry-btn span { display: none; }
-          .user-chip-name { max-width: 80px; }
-          .site-main { padding: 16px 12px; }
-        }
-      `}</style>
-    </div>
-  );
+  const { launch, loading, error: launchError } = useFoundryLaunch();
+  const notify = useToast();
+  useEffect(() => { if (launchError) notify(launchError, 'error'); }, [launchError, notify]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [showThemes, setShowThemes] = useState(false);
+  const { theme } = useElementTheme();
+  const location = useLocation();
+  const menuButton = useRef(null);
+  const sidebar = useRef(null);
+  const previousPath = useRef(location.pathname);
+  useEffect(() => {
+    setMenuOpen(false);
+    if (previousPath.current === location.pathname) return;
+    previousPath.current = location.pathname;
+    const frame = requestAnimationFrame(() => document.getElementById('main-content')?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [location.pathname]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    sidebar.current?.querySelector('button')?.focus();
+    const handleKey = event => {
+      if (event.key === 'Escape') { setMenuOpen(false); menuButton.current?.focus(); }
+      if (event.key === 'Tab') {
+        const items = [...sidebar.current.querySelectorAll('button, a[href]')];
+        const first = items[0], last = items.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    };
+    const handleResize = () => { if (window.innerWidth > 1024) setMenuOpen(false); };
+    document.addEventListener('keydown', handleKey);
+    window.addEventListener('resize', handleResize);
+    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', handleKey); window.removeEventListener('resize', handleResize); };
+  }, [menuOpen]);
+  const closeMenu = () => { setMenuOpen(false); menuButton.current?.focus(); };
+  return <div className="app-shell">
+    <a className="skip-link" href="#main-content">Pular para o conteúdo</a>
+    <header className="app-topbar">
+      <button ref={menuButton} className="ui-button ui-button-ghost ui-icon-button mobile-menu-button" aria-label="Abrir navegação" aria-expanded={menuOpen} aria-controls="app-navigation" onClick={() => setMenuOpen(true)}><Menu size={22} /></button>
+      <Link className="app-brand" to="/" onClick={() => chooseMode('classic')} aria-label="Nimrod · Comunidade"><BrandSeal /><span>NIMROD<small>O encontro dos elementos</small></span></Link>
+      <div className="app-topbar-actions">
+        <span className={connected ? 'connection-status is-connected' : 'connection-status'} role="status" title={connected ? 'Atualizações em tempo real conectadas' : 'Reconectando atualizações'}>{connected ? <Wifi size={15} /> : <WifiOff size={15} />}<span>{connected ? 'Ao vivo' : 'Reconectando'}</span></span>
+        <Button variant="ghost" className="element-trigger" aria-label="Escolher tema elemental" data-tooltip={`Afinidade: ${theme.name}`} onClick={() => setShowThemes(true)}><ElementIcon icon={theme.icon} /><span>{theme.name}</span></Button>
+        <Button variant="primary" className="app-foundry" aria-label={isGM(user) ? 'Iniciar aventura' : 'Entrar na aventura'} onClick={launch} disabled={loading}><Sword size={17} /><span className="app-foundry-label">{loading ? 'Abrindo…' : isGM(user) ? 'Iniciar aventura' : 'Entrar na aventura'}</span><span className="app-foundry-short" aria-hidden="true">{loading ? '…' : 'Jogar'}</span><ExternalLink size={14} /></Button>
+      </div>
+    </header>
+    {menuOpen && <div className="app-menu-backdrop" aria-hidden="true" onClick={closeMenu} />}
+    <aside ref={sidebar} id="app-navigation" className={menuOpen ? 'app-sidebar is-open' : 'app-sidebar'} role={menuOpen ? 'dialog' : undefined} aria-modal={menuOpen || undefined} aria-label="Navegação principal">
+      <div className="app-sidebar-mobile-heading"><strong>Explorar NIMROD</strong><Button variant="ghost" className="ui-icon-button" aria-label="Fechar navegação" onClick={closeMenu}><X size={20} /></Button></div>
+      <nav aria-label="Menu principal">{groups.map(group => <div className="app-nav-group" key={group.title}>
+        <p>{group.title}</p>{group.items.filter(item => !item.gm || isGM(user)).map(({ to, label, icon: Icon, mode, end }) => <NavLink key={to} to={to} end={end} className={({ isActive }) => isActive ? 'app-nav-link active' : 'app-nav-link'} onClick={() => { if (mode) chooseMode(mode); setMenuOpen(false); }}><Icon size={18} /><span>{label}</span></NavLink>)}
+      </div>)}</nav>
+      {user && <div className="app-account"><span className="app-account-avatar">{(user.displayName || user.name || '?')[0]}</span><div><Link to="/profile">{user.displayName || user.name}</Link><small>{roleLabel(user.role)}</small></div><Button variant="ghost" className="ui-icon-button" aria-label="Editar nome de exibição" onClick={() => setShowEdit(true)}><Pencil size={15} /></Button></div>}
+      <p className="app-sidebar-footnote"><span className="element-affinity-mark"><ElementIcon icon={theme.icon} size={14} /></span>{theme.epithet}</p>
+    </aside>
+    <div className="app-workspace" inert={menuOpen ? '' : undefined}><main id="main-content" className="site-main" tabIndex={-1}><Outlet /></main><footer className="app-footer"><span>NIMROD</span> Um mundo. Infinitas histórias.</footer></div>
+    {showEdit && <EditDisplayNameModal onClose={() => setShowEdit(false)} />}
+    {showThemes && <ElementThemePicker onClose={() => setShowThemes(false)} />}
+  </div>;
 }

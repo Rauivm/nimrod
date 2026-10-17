@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../../lib/api.js';
 import SideQuestCard from './SideQuestCard.jsx';
 
@@ -15,7 +15,7 @@ export default function SideQuestList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -35,11 +35,11 @@ export default function SideQuestList() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
 
   useEffect(() => {
     load();
-  }, [filter]);
+  }, [load]);
 
   return (
     <div className="sidequest-list-container">
@@ -82,7 +82,7 @@ export default function SideQuestList() {
             <div key={i} className="skeleton" style={{ height: '200px', borderRadius: 'var(--radius-lg)' }} />
           ))}
         </div>
-      ) : activities.length === 0 ? (
+      ) : activities.length === 0 && !error ? (
         <div style={{
           textAlign: 'center', padding: '64px 24px', color: 'var(--text-muted)',
           border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)',

@@ -1,7 +1,8 @@
+import { Button } from './ui.jsx';
 import { useState, useEffect, useCallback } from 'react';
 import { useWs } from '../contexts/WsContext.jsx';
 import { api } from '../lib/api.js';
-import { useAuth, roleLabel, isGM, isGMPrincipal } from '../contexts/AuthContext.jsx';
+import { useAuth, roleLabel, isGM } from '../contexts/AuthContext.jsx';
 import { Crown, ChevronDown, Link } from 'lucide-react';
 import LinkCharacterModal from './LinkCharacterModal.jsx';
 
@@ -44,7 +45,7 @@ function RoleMenu({ player, onPromoted }) {
         className="role-menu-trigger"
         onClick={() => setOpen(v => !v)}
         disabled={loading}
-        title="Alterar papel"
+        title="Alterar papel" aria-label="Alterar papel do jogador" aria-expanded={open}
       >
         <Crown size={11} />
         <ChevronDown size={10} />
@@ -75,18 +76,19 @@ export function OnlinePlayersPanel() {
   const { on, connected } = useWs();
   const [players, setPlayers] = useState([]);
   const [linkTarget, setLinkTarget] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   const fetchOnline = useCallback(async () => {
     try {
       const data = await api.get('/online-users');
-      setPlayers(data);
-    } catch {
-      // non-critical panel — swallow errors silently
-    }
+      setPlayers(data); setError('');
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => {
-    if (connected) fetchOnline();
+    fetchOnline();
   }, [connected, fetchOnline]);
 
   useEffect(() => {
@@ -105,7 +107,8 @@ export function OnlinePlayersPanel() {
       </div>
 
       <div className="op-list">
-        {players.length === 0 ? (
+        {error && <p role="alert" className="ui-error">Não foi possível atualizar quem está online. <Button onClick={fetchOnline}>Tentar novamente</Button></p>}
+        {loading ? <p role="status" className="ui-form-help">Consultando a comunidade…</p> : !players.length && error ? null : players.length === 0 ? (
           <div className="op-empty">Nenhum aventureiro online</div>
         ) : (
           players.map(p => {

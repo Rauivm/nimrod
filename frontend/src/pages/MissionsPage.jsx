@@ -1,158 +1,133 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { api } from '../lib/api.js';
-import { useWs } from '../contexts/WsContext.jsx';
+import { useLocation } from 'react-router-dom';
+import { Plus, Search, SlidersHorizontal, Sword } from 'lucide-react';
+import { CreateMissionModal } from '../components/CreateMissionModal.jsx';
+import MissionNotifications from '../components/MissionNotifications.jsx';
 import { MissionPoster } from '../components/MissionPoster.jsx';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { Button, PageHeader, StatePanel, LoadingCards } from '../components/ui.jsx';
+import { api } from '../lib/api.js';
+import { matchesMissionSearch } from '../lib/missionPresentation.js';
+import { useWs } from '../contexts/WsContext.jsx';
+import '../styles/mission-board.css';
 
-const FILTERS = [
-  { label: 'Missões',    value: 'MISSION', field: 'kind'   },
-  { label: 'Avisos',     value: 'NOTICE',  field: 'kind'   },
-  { label: 'Abertas',    value: 'OPEN',    field: 'status' },
-  { label: 'Em andamento', value: 'RUNNING', field: 'status' },
-  { label: 'Fechadas',   value: 'CLOSED',  field: 'status' },
-  { label: 'Concluídas', value: 'FINISHED',field: 'status' },
-  { label: 'Todas',      value: '',        field: ''       },
+const PAGE_SIZE = 30;
+const STATUS_FILTERS = [
+  ['', 'Todos os estados'], ['OPEN', 'Aguardando início · abertas'], ['CLOSED', 'Aguardando início · fechadas'],
+  ['RUNNING', 'Em andamento'], ['PAUSED', 'Entre sessões'], ['FINISHED', 'Concluídas'], ['CANCELLED', 'Canceladas'],
 ];
 
-const INITIAL_VISIBLE = 6;
-const MISSIONS_PAGE_SIZE = 30;
-
 export default function MissionsPage() {
-  const { on } = useWs();
+  const { on, connected } = useWs();
+  const { hash } = useLocation();
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
   const [missions, setMissions] = useState([]);
-  const missionsRef = useRef([]);
-  const [filter, setFilter]     = useState(FILTERS[0]);
-  const [loading, setLoading]   = useState(true);
+  const [kind, setKind] = useState(hash ? '' : 'MISSION');
+  const [status, setStatus] = useState('');
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => { missionsRef.current = missions; }, [missions]);
+  const cursor = useRef(null);
+  const request = useRef(0);
+  const busy = useRef(false);
+  const matches = useCallback(m => (!kind || m.kind === kind) && (!status || m.status === status), [kind, status]);
 
   const load = useCallback(async ({ append = false } = {}) => {
+    if (append && busy.current) return;
+    const version = ++request.current;
+    busy.current = true;
     append ? setLoadingMore(true) : setLoading(true);
-    let url = '/missions';
-    const params = [];
-    params.push(`limit=${MISSIONS_PAGE_SIZE}`);
-    if (filter.field === 'status') params.push(`status=${filter.value}`);
-    if (filter.field === 'kind')   params.push(`kind=${filter.value}`);
-    if (append && missionsRef.current.length) params.push(`before=${encodeURIComponent(missionsRef.current.at(-1).created_at)}`);
-    if (params.length) url += '?' + params.join('&');
-    const data = await api.get(url).catch(() => []);
-    setHasMore(data.length === MISSIONS_PAGE_SIZE);
-    setMissions(prev => append ? [...prev, ...data.filter(m => !prev.some(existing => existing.id === m.id))] : data);
-    append ? setLoadingMore(false) : setLoading(false);
-  }, [filter]);
+    setError('');
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+    if (kind) params.set('kind', kind);
+    if (status) params.set('status', status);
+    if (append && cursor.current) params.set('before', cursor.current);
+    try {
+      const data = await api.get(`/missions?${params}`);
+      if (request.current !== version) return;
+      cursor.current = data.at(-1)?.created_at ?? cursor.current;
+      setHasMore(data.length === PAGE_SIZE);
+      setMissions(prev => append ? [...prev, ...data.filter(m => !prev.some(row => row.id === m.id))] : data);
+    } catch (e) {
+      if (request.current === version) setError(e.message);
+    } finally {
+      if (request.current === version) { setLoading(false); setLoadingMore(false); busy.current = false; }
+    }
+  }, [kind, status]);
 
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { setExpanded(false); }, [filter]);
+  const invalidate = useCallback(() => { request.current++; busy.current = false; }, []);
+  useEffect(() => { cursor.current = null; load(); return invalidate; }, [load, invalidate]);
+  const wasConnected = useRef(connected);
+  useEffect(() => { if (connected && !wasConnected.current) load(); wasConnected.current = connected; }, [connected, load]);
+  const update = useCallback(mission => {
+    if (!mission?.id) { load(); return; }
+    setMissions(prev => {
+      const index = prev.findIndex(row => row.id === mission.id);
+      if (!matches(mission)) return prev.filter(row => row.id !== mission.id);
+      if (index < 0) return [mission, ...prev];
+      return prev.map(row => row.id === mission.id ? mission : row);
+    });
+  }, [matches, load]);
 
   useEffect(() => {
-    const matchesFilter = (mission) => {
-      if (!mission?.id) return false;
-      if (filter.field === 'status') return mission.status === filter.value;
-      if (filter.field === 'kind') return mission.kind === filter.value;
-      return true;
+    let disposed = false;
+    const hydrate = async ({ id, missionId } = {}) => {
+      const target = id || missionId;
+      if (!target) return;
+      try { const mission = await api.get(`/missions/${target}`); if (!disposed) update(mission); }
+      catch (e) { if (!disposed) setError(e.message); }
     };
-    const upsert = (mission) => {
-      setMissions(prev => {
-        const next = prev.filter(m => m.id !== mission?.id);
-        return matchesFilter(mission) ? [mission, ...next] : next;
-      });
-    };
-    const u1 = on('MISSION_CREATED', upsert);
-    const u2 = on('MISSION_UPDATED', upsert);
-    const u3 = on('MISSION_DELETED', ({ missionId }) => {
-      setMissions(prev => prev.filter(m => m.id !== missionId));
-    });
-    return () => { u1(); u2(); u3(); };
-  }, [on, filter]);
+    const unsubscribe = [on('MISSION_CREATED', hydrate), on('MISSION_UPDATED', hydrate),
+      on('MISSION_DELETED', ({ missionId }) => setMissions(prev => prev.filter(m => m.id !== missionId)))];
+    return () => { disposed = true; unsubscribe.forEach(fn => fn()); };
+  }, [on, update]);
 
-  const handleMissionUpdate = useCallback((mission) => {
-    if (!mission?.id) return load();
-    const matches = filter.field === 'status'
-      ? mission.status === filter.value
-      : filter.field === 'kind'
-        ? mission.kind === filter.value
-        : true;
-    setMissions(prev => {
-      const next = prev.filter(m => m.id !== mission.id);
-      return matches ? [mission, ...next] : next;
-    });
-  }, [filter, load]);
+  // Inbox links can reach older missions outside the first batch.
+  const [linkedMission, setLinkedMission] = useState(null);
+  useEffect(() => {
+    if (!hash.startsWith('#mission-')) { setLinkedMission(null); return; }
+    const id = hash.slice('#mission-'.length);
+    if (!id) return;
+    let disposed = false;
+    api.get(`/missions/${encodeURIComponent(id)}`).then(mission => {
+      if (!disposed) { setLinkedMission(mission); setSearch(''); }
+    }).catch(e => { if (!disposed) setError(e.message); });
+    return () => { disposed = true; };
+  }, [hash]);
+  useEffect(() => {
+    if (!linkedMission || loading) return;
+    const target = document.getElementById(`mission-${linkedMission.id}`);
+    target?.scrollIntoView({ block: 'center' });
+    target?.querySelector('.poster-toggle')?.focus({ preventScroll: true });
+  }, [linkedMission, loading]);
 
-  const visible = useMemo(
-    () => expanded ? missions : missions.slice(0, INITIAL_VISIBLE),
-    [expanded, missions],
-  );
-  const hasHidden = missions.length > INITIAL_VISIBLE;
-
-  return (
-    <div className="missions-page">
-      <div className="page-header">
-        <h1 className="page-title">📋 Quadro de Avisos</h1>
+  const visible = useMemo(() => missions.filter(m => matchesMissionSearch(m, search)), [missions, search]);
+  const clearFilters = () => { setKind(''); setStatus(''); setSearch(''); };
+  const linkedOutsideList = linkedMission && !visible.some(m => m.id === linkedMission.id);
+  return <div className="missions-page">
+    <PageHeader emblem eyebrow="Contratos da guilda · Sua próxima história" title="Quadro de Avisos"
+      description="Descubra aventuras, reúna seu grupo e acompanhe cada capítulo da sua jornada."
+      action={<Button variant="primary" onClick={() => setCreating(true)}><Plus size={18} /> Nova missão / aviso</Button>} />
+    <div className="board-intro"><Sword size={22} aria-hidden="true" /><p><strong>Uma nova história começa com um convite.</strong> Confira os níveis e as vagas, abra a missão e escolha como participar. O narrador e o criador administram o grupo no mesmo lugar.</p></div>
+    <MissionNotifications />
+    <section className="board-filters" aria-label="Pesquisa e filtros do quadro">
+      <div className="ui-tabs" role="group" aria-label="Tipo de publicação">
+        {[['MISSION', 'Missões'], ['NOTICE', 'Avisos'], ['', 'Tudo']].map(([value, label]) => <Button key={value} aria-pressed={kind === value} onClick={() => setKind(value)}>{label}</Button>)}
       </div>
-
-      <div className="filter-bar">
-        {FILTERS.map(f => (
-          <button
-            key={f.value + f.field}
-            onClick={() => setFilter(f)}
-            className={`filter-btn ${filter.value === f.value && filter.field === f.field ? 'active' : ''}`}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="board-filter-fields">
+        <label className="board-search"><span className="sr-only">Pesquisar nas publicações carregadas</span><Search size={18} aria-hidden="true" /><input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por aventura, narrador ou criador" aria-describedby="board-search-scope" /></label>
+        <label className="board-status-filter"><SlidersHorizontal size={17} aria-hidden="true" /><span className="sr-only">Estado da aventura</span><select value={status} onChange={e => setStatus(e.target.value)}>{STATUS_FILTERS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       </div>
-
-      {loading ? (
-        <div className="poster-grid">
-          {[1,2,3].map(i => <div key={i} className="skeleton poster-skeleton" />)}
-        </div>
-      ) : missions.length === 0 ? (
-        <div className="empty-state">Nenhum item encontrado</div>
-      ) : (
-        <>
-          <div className="poster-grid">
-            {visible.map(m => <MissionPoster key={m.id} mission={m} onUpdate={handleMissionUpdate} />)}
-          </div>
-          {hasHidden && (
-            <div className="expand-row">
-              <button onClick={() => setExpanded(v => !v)} className="expand-btn">
-                {expanded
-                  ? <><ChevronUp size={13} /> Recolher</>
-                  : <><ChevronDown size={13} /> Ver todos ({missions.length})</>}
-              </button>
-            </div>
-          )}
-          {expanded && hasMore && (
-            <div className="expand-row">
-              <button onClick={() => load({ append: true })} disabled={loadingMore} className="expand-btn">
-                {loadingMore ? 'Carregando...' : 'Carregar mais'}
-              </button>
-            </div>
-          )}
-        </>
-      )}
-
-      <style>{`
-        .missions-page { max-width: 1100px; margin: 0 auto; }
-        .page-header { margin-bottom: 20px; }
-        .page-title { font-family: var(--font-display); font-size: 20px; color: var(--gold); letter-spacing: 3px; text-transform: uppercase; }
-        .filter-bar { display: flex; gap: 6px; margin-bottom: 28px; flex-wrap: wrap; }
-        .filter-btn { padding: 6px 16px; border-radius: var(--radius); background: var(--bg-card); color: var(--text-muted); font-size: 13px; font-family: var(--font-display); letter-spacing: 0.5px; text-transform: uppercase; border: 1px solid var(--border); transition: all 0.15s; }
-        .filter-btn:hover { border-color: var(--border-bright); color: var(--text); }
-        .filter-btn.active { background: rgba(201,168,76,0.1); border-color: var(--gold-dim); color: var(--gold); }
-        .poster-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 36px 24px; padding: 20px 16px 28px; }
-        .poster-skeleton { height: 260px; border-radius: 2px; }
-        .expand-row { display: flex; justify-content: center; margin-top: 8px; }
-        .expand-btn { display: flex; align-items: center; gap: 5px; background: none; color: var(--text-muted); font-size: 12px; padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius); transition: all 0.15s; letter-spacing: 0.5px; font-family: var(--font-display); text-transform: uppercase; }
-        .expand-btn:hover { color: var(--gold); border-color: var(--gold-dim); }
-        .empty-state { text-align: center; padding: 64px 24px; color: var(--text-muted); border: 1px dashed var(--border); border-radius: var(--radius-lg); font-style: italic; }
-        @media (max-width: 600px) {
-          .poster-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 24px 16px; padding: 16px 8px 24px; }
-        }
-      `}</style>
-    </div>
-  );
+      <div className="board-results"><p id="board-search-scope" role="status" aria-live="polite">{loading ? 'Carregando publicações…' : `${visible.length} de ${missions.length} publicações carregadas`}{hasMore && ' · Há mais no quadro.'} A busca considera os itens carregados.</p>{(search || status || kind !== 'MISSION') && <Button variant="ghost" onClick={clearFilters}>Limpar filtros</Button>}</div>
+    </section>
+    {error && <StatePanel kind="error" title="Não foi possível atualizar o quadro" action={<Button onClick={() => load()}>Tentar novamente</Button>}>{error}</StatePanel>}
+    {loading ? <LoadingCards label="Carregando o quadro de avisos" /> : <>
+      {linkedOutsideList && <section className="board-linked"><h2>Publicação da notificação</h2><MissionPoster mission={linkedMission} onUpdate={m => { if (m?.id) setLinkedMission(m); update(m); }} /></section>}
+      {!visible.length && !error && <StatePanel title={search || status ? 'Nenhuma publicação corresponde aos filtros' : 'O próximo capítulo ainda está por vir'} action={<Button onClick={search || status ? clearFilters : () => setCreating(true)}>{search || status ? 'Limpar filtros' : 'Publicar missão ou aviso'}</Button>}>{hasMore ? 'Carregue mais publicações para ampliar sua busca.' : 'Explore outros filtros ou convide a comunidade para uma aventura.'}</StatePanel>}
+      <div className="poster-grid">{visible.map(m => <MissionPoster key={m.id} mission={m} onUpdate={update} />)}</div>
+      {hasMore && <div className="board-pagination"><Button disabled={loadingMore} onClick={() => load({ append: true })}>{loadingMore ? 'Carregando…' : 'Carregar mais publicações'}</Button></div>}
+    </>}
+    {creating && <CreateMissionModal onClose={() => setCreating(false)} onCreated={() => load()} />}
+  </div>;
 }

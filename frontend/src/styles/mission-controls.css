@@ -1,0 +1,12 @@
+.mission-controls { color: var(--text); font: 400 var(--text-sm)/1.6 var(--font-body); display: grid; gap: var(--space-4); padding-block: var(--space-4); border-top: 1px solid var(--border); }
+.mission-controls h4 { font-size: var(--text-sm); margin-block: var(--space-3); color: var(--gold-bright); }
+.mission-controls .poster-actions { justify-content: flex-start; gap: var(--space-3); }
+.mission-controls label { display: grid; gap: var(--space-2); font-size: var(--text-sm); color: var(--text-muted); }
+.mission-controls label:has(input[type=checkbox]) { display: flex; align-items: center; flex-wrap: wrap; }
+.mission-controls input:not([type=checkbox]), .mission-controls textarea, .mission-controls select { background: var(--bg-field); color: var(--text); border: 1px solid var(--border-field); }
+.mission-controls .poster-edit-form { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: var(--space-4); }
+.mission-controls [role=alert] { color: var(--crimson-bright); }
+.mission-controls li { margin-left: var(--space-5); padding-block: var(--space-2); }
+.mission-controls details { border-block: 1px solid var(--border); padding: var(--space-2) 0; }
+.mission-controls > div:has(> h4) > div { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding-block: var(--space-3); border-bottom: 1px solid var(--border); }
+@media (max-width: 600px) { .mission-controls .poster-edit-form { grid-template-columns: 1fr; } }

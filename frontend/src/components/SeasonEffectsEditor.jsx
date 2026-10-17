@@ -15,7 +15,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api.js';
 import { SEASONS } from '../config/calendarSeasons.js';
 import { getEffectIcon, getEffectBadge } from '../config/seasonEffectDisplay.js';
-import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, X, Loader2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, Loader2 } from 'lucide-react';
 
 const SEASON_TABS = Object.values(SEASONS); // [{key, name, accentColor, icon}, ...]
 

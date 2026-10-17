@@ -1,3 +1,4 @@
+import { PageHeader, Badge } from '../components/ui.jsx';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
@@ -128,16 +129,19 @@ function StatBadge({ icon: Icon, label, value }) {
 function AllPlayersPanel() {
   const navigate = useNavigate();
   const [players, setPlayers]   = useState([]);
+  const [playersError, setPlayersError] = useState('');
+  const [playersRevision, setPlayersRevision] = useState(0);
   const [loading, setLoading]   = useState(true);
   const [search, setSearch]     = useState('');
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
+    setLoading(true); setPlayersError('');
     api.get('/players')
       .then(data => setPlayers(data ?? []))
-      .catch(() => setPlayers([]))
+      .catch(e => setPlayersError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [playersRevision]);
 
   const filtered = players.filter(p =>
     !search.trim() ||
@@ -176,6 +180,7 @@ function AllPlayersPanel() {
 
       {expanded && (
         <div className="all-players-panel">
+          {playersError && <p role="alert" className="ui-error">{playersError} <button className="ui-button ui-button-secondary" onClick={() => setPlayersRevision(v => v + 1)}>Tentar novamente</button></p>}
           {/* Search */}
           <div className="all-players-search">
             <Search size={13} style={{ color: 'var(--text-faint)', flexShrink: 0 }} />
@@ -189,7 +194,7 @@ function AllPlayersPanel() {
 
           {loading ? (
             [1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 64 }} />)
-          ) : filtered.length === 0 ? (
+          ) : filtered.length === 0 && !playersError ? (
             <div className="empty-state">Nenhum jogador encontrado.</div>
           ) : (
             <div className="all-players-list">
@@ -316,18 +321,19 @@ export default function ProfilePage() {
   const [loadingAvail, setLoadingAvail]       = useState(false);
   const [showLinkSection, setShowLinkSection] = useState(false);
   const [linkingId, setLinkingId]             = useState(null);
+  const [availableError, setAvailableError] = useState('');
 
   const loadAvailableChars = useCallback(async () => {
     if (!isOwn || isGM(me)) return;
-    setLoadingAvail(true);
+    setLoadingAvail(true); setAvailableError('');
     try {
       const data = await api.get('/me/characters/available');
       setAvailableChars(data ?? []);
-    } catch {
-      setAvailableChars([]);
+    } catch (err) {
+      setAvailableError(err.message);
     }
     setLoadingAvail(false);
-  }, [isOwn, currentUserIsGM ]);
+  }, [isOwn, me]);
 
   const loadProfile = useCallback(async () => {
     if (!targetId) return;
@@ -392,7 +398,7 @@ export default function ProfilePage() {
     setSyncResult(null);
 
     try {
-      const result = await api.post('/foundry/actors/sync', {});
+      await api.post('/foundry/actors/sync', {});
       await loadProfile();
 
       setSyncResult(
@@ -406,13 +412,13 @@ export default function ProfilePage() {
   };
 
   if (loading) return (
-    <div className="profile-loading">
+    <div className="profile-loading" role="status" aria-label="Carregando perfil">
       {[1,2,3].map(i => <div key={i} className="skeleton" style={{ height: i === 1 ? 100 : 160 }} />)}
     </div>
   );
 
   if (error) return (
-    <div className="profile-error">
+    <div className="profile-error" role="alert">
       <p>Erro ao carregar perfil: {error}</p>
       <button onClick={loadProfile}>Tentar novamente</button>
     </div>
@@ -426,6 +432,8 @@ export default function ProfilePage() {
 
   return (
     <div className="profile-root">
+      <PageHeader eyebrow="Sua identidade na comunidade" title={isOwn ? 'Perfil e personagens' : 'Perfil do aventureiro'} description="Suas histórias, seus heróis e os vínculos que levam você à mesa." />
+      {isOwn && <div className="profile-link-status"><Badge tone={activeChars.length ? 'success' : 'warning'}>{activeChars.length ? activeChars.length + ' personagens ativos vinculados' : 'Nenhum personagem ativo vinculado'}</Badge><span>{currentUserIsGM ? 'Use as ferramentas abaixo para sincronizar dados e gerenciar vínculos.' : 'Vincule um personagem disponível na seção abaixo para jogar com ele.'}</span></div>}
 
       {/* ── Voltar (GM_PRINCIPAL vendo perfil alheio) ────────────────────── */}
       {iAmGMPrincipal && !isOwn && (
@@ -453,7 +461,7 @@ export default function ProfilePage() {
 
         <div className="profile-identity">
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <h1 className="profile-name">{user.displayName}</h1>
+            <h2 className="profile-name">{user.displayName}</h2>
             {isGM(user)
               ? <span className="gm-badge">GM — Mestre</span>
               : <span className="player-badge">Jogador</span>
@@ -574,6 +582,7 @@ export default function ProfilePage() {
 
           {showLinkSection && (
             <div className="player-link-panel">
+              {availableError && <p className="ui-error" role="alert">{availableError} <button className="ui-button ui-button-secondary" onClick={loadAvailableChars}>Tentar novamente</button></p>}
               <p className="player-link-hint">
                 Selecione personagens do Foundry para vincular à sua conta.
                 Personagens já vinculados aparecem marcados — clique em desvincular para remover.
@@ -581,7 +590,7 @@ export default function ProfilePage() {
 
               {loadingAvail ? (
                 <div className="empty-state" style={{ padding: 20 }}>Carregando personagens disponíveis...</div>
-              ) : availableChars.length === 0 ? (
+              ) : availableChars.length === 0 && !availableError ? (
                 <div className="empty-state">
                   <span>Nenhum personagem disponível para vincular.</span>
                   <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
