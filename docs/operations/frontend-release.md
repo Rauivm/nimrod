@@ -51,3 +51,48 @@ Antes de aplicar: conservar backup do banco e referência do código anterior.
 Construir backend e frontend antes de recriar esses dois serviços. Manter
 PostgreSQL, Redis, bridges e túnel existentes. Não copiar o override Docker
 exclusivo do PC para produção. Homologação Foundry real permanece separada.
+
+## Publicação concluída em 17/10/2026
+
+- Interface: `ef5e703`; dependências de missões já implementadas: `0b6d9e3`.
+- Servidor `/opt/nimrod`, branch local `main`: merge `8f9027a`, preservando
+  o commit próprio `13091e7` e `foundry-module/nimrod-launcher` não rastreado.
+  O branch publicado no GitHub é `codex/ui-elemental-refinement`; o `main`
+  remoto não foi modificado por esta publicação.
+- Backup em `/home/raui/.local/state/nimrod/release-20261017-evtsJI`: bundle
+  do código, módulo não rastreado, configuração privada protegida e dumps
+  PostgreSQL. Um segundo dump foi criado imediatamente antes da ativação;
+  ambos tiveram seu catálogo validado com `pg_restore --list`. Não foi
+  realizado um ensaio de restauração integral em produção.
+- Builds Docker de backend e frontend passaram no servidor. O build frontend
+  gerou os mesmos hashes e tamanhos validados localmente, incluindo
+  `index-IRSC_zNx.js` e `index-DxIxrI5-.css`.
+- Somente backend e frontend foram recriados. O Nginx externo passou em
+  `nginx -t` e recebeu reload. IDs de PostgreSQL, Redis, bridges, Nginx e
+  Cloudflare permaneceram os mesmos.
+- Backend confirmado com `NODE_ENV=production`; migrações 034/035 aplicadas.
+  A primeira espera de saúde expirou em 60 segundos enquanto a migração 035
+  estava em andamento. A inspeção mostrou o container sem reinícios, espera
+  de gravação WAL sem bloqueadores e, em seguida, migração e startup completos.
+  O frontend só foi substituído após a resposta de saúde do backend.
+- Smoke tests em `http://frontend` e `http://nginx`: saúde HTTP 200,
+  `/api/me` sem autenticação HTTP 401, `/nimrod/missions` sem credencial
+  Foundry HTTP 401 com a mensagem esperada, HTML do quadro e assets elementais
+  JavaScript/CSS HTTP 200.
+- Contagens imediatamente antes/depois: duas missões, três inscrições e duas
+  sessões. Nenhum registro de teste foi criado em produção.
+- Uma missão ativa legada precisa configurar seus limites estruturados
+  (mínimo de jogadores e/ou faixa de níveis) em **Editar missão** antes de
+  novas inscrições/início. Não foram inferidos valores nem alterados registros
+  para contornar essa exigência do módulo já implementado.
+
+Limites: não foi realizada inscrição real, postagem ou sessão Foundry real
+em produção. A interface foi validada por cenários com APIs simuladas e o
+backend por banco descartável, complementados pelos smoke tests acima.
+
+Avisos mantidos: 11 alertas npm já registrados (um baixo, cinco moderados e
+cinco altos). A dependência de desenvolvimento `@axe-core/playwright@4.14.0`
+exige Node >=22.12; o ambiente local de testes usou Node 22.23.1. O builder
+Docker Node 20 emitiu aviso de engine, mas compilou; essa ferramenta de testes
+não integra o bundle ou o container Nginx final. Não foram executados testes
+axe dentro do builder Node 20 nem aplicadas atualizações automáticas.
