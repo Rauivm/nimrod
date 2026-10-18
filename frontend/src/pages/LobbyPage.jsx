@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { Link } from 'react-router-dom';
 import { useExperience } from '../contexts/ExperienceContext.jsx';
 import '../styles/experience.css';
+import { hubConfig } from '../features/social-hub/config/hubConfig';
 
 export default function LobbyPage() {
   const { user } = useAuth();
@@ -76,6 +77,7 @@ export default function LobbyPage() {
       </>}
       <p className="hub-entry-help">A taverna é uma sala compartilhada. Use WASD, toque ou clique para circular e o chat local para conversar. Entrar não inscreve você em uma missão.</p>
       <nav className="hub-entry-actions" aria-label="Opções da taverna">
+        <Link to={hubConfig.routes.html5}>Conhecer a prévia HTML5</Link>
         <Link to="/missions">Ver mural de aventuras</Link>
         <Link to="/" onClick={() => chooseMode('classic')}>Voltar ao Modo Clássico</Link>
       </nav>

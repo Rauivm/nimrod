@@ -15,6 +15,7 @@ const SessionsPage = lazy(() => import('./pages/SessionsPage.jsx'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage.jsx'));
 const SideQuestsPage = lazy(() => import('./pages/SideQuestsPage.jsx'));
 const LobbyPage = lazy(() => import('./pages/LobbyPage.jsx'));
+const Html5LobbyPage = lazy(() => import('./pages/Html5LobbyPage.jsx'));
 
 import SplashScreen from './components/SplashScreen.jsx';
 import LgpdConsentModal from './components/LgpdConsentModal.jsx';
@@ -204,6 +205,7 @@ export default function App() {
           <Route path="/" element={<Layout />}>
             <Route index element={<ExperienceEntryPage />} />
             <Route path="lobby" element={<LobbyPage />} />
+            <Route path="lobby/html5" element={<Html5LobbyPage />} />
             <Route path="foundry-connect" element={<FoundryConnectPage />} />
 
             <Route

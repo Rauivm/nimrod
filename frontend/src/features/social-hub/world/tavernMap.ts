@@ -1,0 +1,64 @@
+import type { Point } from './isometric';
+
+export type PropKind = 'counter' | 'table' | 'fireplace' | 'shelf' | 'board' | 'stage' | 'chair' | 'barrels' | 'arch';
+export interface TavernProp {
+  id: string;
+  kind: PropKind;
+  position: Point;
+  width: number;
+  flip?: boolean;
+  shearY?: number;
+  // Occupied ground rectangle; navigation expands this by the explorer radius.
+  footprint: { width: number; height: number };
+}
+
+const tables: Point[] = [
+  { x: 6.8, y: 4.1 }, { x: 10.6, y: 4.6 }, { x: 7.1, y: 7.1 },
+  { x: 4.3, y: 9.3 }, { x: 9.8, y: 8.6 },
+];
+
+const furnishings: TavernProp[] = [
+  { id: 'drinks-shelf', kind: 'shelf', position: { x: 0.8, y: 4.2 }, width: 250, shearY: -0.38, footprint: { width: 0.8, height: 3.8 } },
+  { id: 'bar-counter', kind: 'counter', position: { x: 3.1, y: 4.5 }, width: 290, shearY: -0.24, footprint: { width: 1.2, height: 4.1 } },
+  { id: 'hearth', kind: 'fireplace', position: { x: 11.4, y: 0.9 }, width: 218, footprint: { width: 2.5, height: 1.1 } },
+  { id: 'quest-board', kind: 'board', position: { x: 1.1, y: 9 }, width: 174, shearY: -0.65, footprint: { width: 0.8, height: 2.2 } },
+  { id: 'musicians-stage', kind: 'stage', position: { x: 7.5, y: 1.6 }, width: 205, footprint: { width: 2.5, height: 1.8 } },
+  { id: 'tavern-entrance', kind: 'arch', position: { x: 4.7, y: 0.75 }, width: 145, footprint: { width: 1.8, height: 1.4 } },
+  { id: 'barrel-stock', kind: 'barrels', position: { x: 1.5, y: 1.3 }, width: 105, footprint: { width: 1.2, height: 1.2 } },
+  { id: 'hearth-stock', kind: 'barrels', position: { x: 12.7, y: 3 }, width: 100, footprint: { width: 1.2, height: 1.2 } },
+];
+
+tables.forEach((position, index) => {
+  furnishings.push({ id: `table-${index + 1}`, kind: 'table', position, width: 145, footprint: { width: 1.5, height: 1.5 } });
+  for (const [seat, offset] of [{ x: -1.1, y: -0.1 }, { x: 1.1, y: 0.1 }, { x: 0.1, y: 1.2 }].entries()) {
+    furnishings.push({
+      id: `table-${index + 1}-chair-${seat + 1}`, kind: 'chair',
+      position: { x: position.x + offset.x, y: position.y + offset.y }, width: 57,
+      flip: seat === 0, footprint: { width: 0.5, height: 0.5 },
+    });
+  }
+});
+
+export const tavernMap = {
+  id: 'nimrod-tavern-v1',
+  version: 2,
+  orientation: 'isometric',
+  columns: 14,
+  rows: 12,
+  tileWidth: 96,
+  tileHeight: 48,
+  wallHeight: 148,
+  props: furnishings,
+  tables,
+  spawn: { x: 4.7, y: 2.3 },
+  // Approach points are on walkable ground, outside the furniture footprints.
+  points: [
+    { id: 'bar', label: 'Balcão', target: 'bar-counter', position: { x: 4.3, y: 4.6 }, kind: 'host' },
+    { id: 'missions', label: 'Mural de missões', target: 'quest-board', position: { x: 2.7, y: 9 }, kind: 'missions' },
+    { id: 'music', label: 'Recanto dos músicos', target: 'musicians-stage', position: { x: 7.5, y: 3 }, kind: 'music' },
+    { id: 'fire', label: 'Lareira', target: 'hearth', position: { x: 11.2, y: 2.1 }, kind: 'hearth' },
+    { id: 'entrance', label: 'Portal do Foundry', target: 'tavern-entrance', position: { x: 4.7, y: 2.3 }, kind: 'entrance' },
+  ],
+} as const;
+
+export type InteractionId = typeof tavernMap.points[number]['id'];

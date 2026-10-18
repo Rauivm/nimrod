@@ -11,13 +11,15 @@ import BrandSeal from './BrandSeal.jsx';
 import ElementThemePicker, { ElementIcon } from './ElementThemePicker.jsx';
 import { useElementTheme } from '../contexts/ElementThemeContext.jsx';
 import '../styles/layout.css';
+import { hubConfig } from '../features/social-hub/config/hubConfig';
 
 const groups = [
   { title: 'Sua jornada', items: [
     { to: '/', label: 'Comunidade', icon: Scroll, mode: 'classic', end: true },
     { to: '/missions', label: 'Quadro de Avisos', icon: Sword },
     { to: '/sidequests', label: 'Side Quests', icon: Compass },
-    { to: '/lobby', label: 'Taverna · Modo Jogo', icon: Gamepad2, mode: 'game' },
+    { to: '/lobby', label: 'Taverna · Modo Jogo', icon: Gamepad2, mode: 'game', end: true },
+    { to: hubConfig.routes.html5, label: 'Taverna HTML5 · Experimental', icon: Gamepad2, mode: 'game' },
   ] },
   { title: 'O mundo', items: [
     { to: '/calendar', label: 'Calendário', icon: Calendar },

@@ -1,0 +1,62 @@
+.social-hub { max-width: 1120px; margin-inline: auto; }
+.social-hub-heading { max-width: 720px; }
+.social-hub-badge { display: inline-block; padding: 5px 10px; border: 1px solid var(--gold-dim); border-radius: 20px; color: var(--gold-bright); font-size: var(--text-xs); }
+.social-hub-heading h1 { margin: 16px 0 10px; color: var(--text); font: 500 clamp(26px, 4vw, 38px)/1.3 var(--font-display); }
+.social-hub-heading p, .social-hub-scope { color: var(--text-muted); line-height: 1.65; }
+.social-hub-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 24px 0; }
+.social-hub-viewport { position: relative; isolation: isolate; height: clamp(460px, 70dvh, 780px); overflow: hidden; border: 1px solid var(--gold-dim); border-radius: var(--radius-lg); background: #191610; }
+.social-hub-canvas { position: absolute; inset: 0; }
+.social-hub-canvas canvas { display: block; }
+.social-hub-scene-message { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 16px; padding: 28px; text-align: center; color: #f1e3cc; pointer-events: none; }
+.social-hub-scene-message > svg { color: #d0af72; }
+.social-hub-scene-message h2 { font: 500 clamp(20px, 3vw, 28px)/1.35 var(--font-display); margin: 0; }
+.social-hub-scene-message p { max-width: 48ch; margin: 0; line-height: 1.65; color: #d0c2af; }
+.social-hub-scene-message button { pointer-events: auto; }
+.social-hub-render-status { color: #d0c2af; font-size: var(--text-xs); }
+.social-hub-scope { max-width: 82ch; margin-top: 18px; font-size: var(--text-sm); }
+.social-hub-auth { padding: 32px; border: 1px solid var(--border-bright); border-radius: var(--radius); background: var(--bg-card); color: var(--text); }
+.social-hub-map-heading { position: absolute; top: 18px; left: 20px; padding: 8px 12px; background: #19150fdd; border: 1px solid #695333; border-radius: 5px; color: #efdab8; pointer-events: none; }
+.social-hub-map-heading span { display: block; font: 14px var(--font-display); }
+.social-hub-map-heading small { display: block; max-width: 26ch; overflow-wrap: anywhere; color: #cab997; font-size: 11px; }
+.social-hub-characters { margin-bottom: 22px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); }
+.social-hub-characters > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.social-hub-characters h2 { margin: 0; font: 500 21px var(--font-display); color: var(--text); }
+.social-hub-characters p { margin: 7px 0; line-height: 1.6; color: var(--text-muted); overflow-wrap: anywhere; }
+.social-hub-characters label { display: block; margin-bottom: 7px; color: var(--text); font-size: var(--text-sm); }
+.social-hub-characters select { width: 100%; max-width: 520px; min-height: 44px; padding: 10px 12px; color: var(--text); background: var(--bg); border: 1px solid var(--border-bright); border-radius: var(--radius); }
+.social-hub-character-content { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); align-items: center; gap: 24px; }
+.social-hub-character-card { display: flex; gap: 14px; align-items: center; min-width: 0; }
+.social-hub-character-card > div { min-width: 0; }
+.social-hub-character-card h3 { margin: 0; color: var(--gold-bright); font: 500 23px var(--font-display); overflow-wrap: anywhere; }
+.social-hub-character-card p { font-size: var(--text-sm); }
+.social-hub-character-portrait { display: grid; place-items: center; width: 64px; height: 64px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--gold-dim); overflow: hidden; background: var(--bg); color: var(--text-muted); }
+.social-hub-character-portrait img { width: 100%; height: 100%; object-fit: cover; }
+.social-hub-appearance { margin-top: 8px; font-size: var(--text-sm); color: var(--text-muted); }
+.social-hub-appearance summary { min-height: 28px; cursor: pointer; color: var(--gold-bright); }
+.social-hub-appearance p { max-width: 62ch; }
+@media (max-width: 700px) {
+  .social-hub-character-content { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+}
+.social-hub-camera { position: absolute; bottom: 14px; right: 16px; display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid #695333; border-radius: 6px; background: #19150ff2; color: #efdab8; }
+.social-hub-camera button { display: grid; place-items: center; min-width: 40px; min-height: 40px; color: #efdab8; background: transparent; border: 0; border-radius: 3px; }
+.social-hub-camera button:hover:not(:disabled) { background: #523b24; }
+.social-hub-camera output { min-width: 48px; text-align: center; font-size: 12px; }
+.social-hub-areas { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 0; padding: 0; list-style: none; }
+.social-hub-areas button { min-height: 44px; padding: 7px 12px; border: 1px solid var(--border); border-radius: 20px; background: var(--bg-card); color: var(--text-muted); font-size: 12px; }
+.social-hub-areas button:hover:not(:disabled) { border-color: var(--gold-dim); color: var(--gold-bright); }
+.social-hub-canvas canvas:focus-visible { outline: 3px solid #8ce0d2; outline-offset: -4px; }
+.social-hub-controls { color: var(--text-muted); font-size: var(--text-sm); line-height: 1.65; margin: 14px 0 8px; }
+.social-hub-notice { min-height: 1.5em; margin: 12px 0; color: var(--gold-bright); font-size: var(--text-sm); }
+.social-hub-interaction { padding: 20px; border: 1px solid var(--gold-dim); border-radius: var(--radius); background: var(--bg-card); }
+.social-hub-interaction header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.social-hub-interaction h2 { margin: 0; color: var(--text); font: 500 22px var(--font-display); }
+.social-hub-interaction p { color: var(--text-muted); line-height: 1.65; max-width: 75ch; }
+.social-hub-interaction header button { display: grid; place-items: center; min-width: 44px; min-height: 44px; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
+.social-hub-interaction-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; }
+@media (max-width: 480px) {
+  .social-hub-navigation { display: grid; grid-template-columns: 1fr; }
+  .social-hub-viewport { height: 380px; }
+  .social-hub-scene-message { padding: 22px; }
+  .social-hub-map-heading { top: 10px; left: 10px; padding: 6px 8px; }
+  .social-hub-camera { right: 10px; bottom: 10px; }
+}

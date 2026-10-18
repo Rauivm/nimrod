@@ -1,0 +1,92 @@
+{
+  "version": 2,
+  "assets": [
+    {
+      "file": "tavern-props-v1.png",
+      "width": 1254,
+      "height": 1254,
+      "format": "PNG RGBA",
+      "sha256": "3e02678d8ec7eb62bf8dd86bb2d64862ebcc662a1999430c1a2b84a2adf67735",
+      "origin": "Generated specifically for Nimrod using the built-in OpenAI image_gen tool",
+      "created": "2026-10-17",
+      "thirdPartyAssetPack": false,
+      "rights": "User-owned generated output as between the user and OpenAI, subject to the applicable terms and law. No third-party asset-pack license is asserted.",
+      "termsReviewed": "https://openai.com/policies/terms-of-use/",
+      "termsEffective": "2026-01-01",
+      "promptAndProvenance": "GENERATION.md",
+      "frames": "frontend/src/features/social-hub/assets/atlasFrames.ts"
+    },
+    {
+      "file": "avatars-arcane-v1.png",
+      "bytes": 2194021,
+      "sha256": "1ad319ea29facc73b572ea7cc91a446ae92f09e8c5b1961f0fa0f2eb24ccfcc7",
+      "width": 1254,
+      "height": 1254,
+      "format": "PNG RGBA",
+      "origin": "Original class/neutral character sprites generated for Nimrod using the built-in OpenAI image_gen tool",
+      "created": "2026-10-17",
+      "thirdPartyAssetPack": false,
+      "rights": "User-owned generated output as between the user and OpenAI, subject to the applicable terms and law. No third-party asset-pack license is asserted.",
+      "termsReviewed": "https://openai.com/policies/terms-of-use/",
+      "termsEffective": "2026-01-01",
+      "promptAndProvenance": "AVATAR-GENERATION.md",
+      "frames": "frontend/src/features/social-hub/assets/avatarFrames.ts"
+    },
+    {
+      "file": "avatars-martial-v1.png",
+      "bytes": 2110120,
+      "sha256": "7c12c7ec3aa4856d24ba44877100f8f675533373c82f2e8f139f4dbd88fc393c",
+      "width": 1254,
+      "height": 1254,
+      "format": "PNG RGBA",
+      "origin": "Original class/neutral character sprites generated for Nimrod using the built-in OpenAI image_gen tool",
+      "created": "2026-10-17",
+      "thirdPartyAssetPack": false,
+      "rights": "User-owned generated output as between the user and OpenAI, subject to the applicable terms and law. No third-party asset-pack license is asserted.",
+      "termsReviewed": "https://openai.com/policies/terms-of-use/",
+      "termsEffective": "2026-01-01",
+      "promptAndProvenance": "AVATAR-GENERATION.md",
+      "frames": "frontend/src/features/social-hub/assets/avatarFrames.ts"
+    },
+    {
+      "file": "avatars-primal-v1.png",
+      "bytes": 2085901,
+      "sha256": "cb3ebb410f4ea237ad855706bb22efebd22197dd545d2e2cc8cab3fa6ec3457b",
+      "width": 1254,
+      "height": 1254,
+      "format": "PNG RGBA",
+      "origin": "Original class/neutral character sprites generated for Nimrod using the built-in OpenAI image_gen tool",
+      "created": "2026-10-17",
+      "thirdPartyAssetPack": false,
+      "rights": "User-owned generated output as between the user and OpenAI, subject to the applicable terms and law. No third-party asset-pack license is asserted.",
+      "termsReviewed": "https://openai.com/policies/terms-of-use/",
+      "termsEffective": "2026-01-01",
+      "promptAndProvenance": "AVATAR-GENERATION.md",
+      "frames": "frontend/src/features/social-hub/assets/avatarFrames.ts"
+    },
+    {
+      "file": "avatars-traveler-v1.png",
+      "bytes": 1667364,
+      "sha256": "35aa2221c80f34c47ea9a1338fee989fc2bad5c7b46876eb688690c1613db99a",
+      "width": 1536,
+      "height": 1024,
+      "format": "PNG RGBA",
+      "origin": "Original class/neutral character sprites generated for Nimrod using the built-in OpenAI image_gen tool",
+      "created": "2026-10-17",
+      "thirdPartyAssetPack": false,
+      "rights": "User-owned generated output as between the user and OpenAI, subject to the applicable terms and law. No third-party asset-pack license is asserted.",
+      "termsReviewed": "https://openai.com/policies/terms-of-use/",
+      "termsEffective": "2026-01-01",
+      "promptAndProvenance": "AVATAR-GENERATION.md",
+      "frames": "frontend/src/features/social-hub/assets/avatarFrames.ts"
+    }
+  ],
+  "proceduralArtwork": {
+    "source": [
+      "frontend/src/features/social-hub/scene/drawArchitecture.ts",
+      "frontend/src/features/social-hub/scene/TavernLighting.ts",
+      "frontend/src/features/social-hub/scene/ExplorerMarker.ts"
+    ],
+    "origin": "Original project-local code: architecture, rugs, hangings, shadows, lighting, selection rings, destinations and nameplates. Class character artwork is listed separately above."
+  }
+}
