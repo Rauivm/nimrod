@@ -3,14 +3,15 @@ import { mountHubScene } from './mountHubScene';
 import type { HubSceneHandle, SceneStatus } from './mountHubScene';
 import type { InteractionId } from '../world/tavernMap';
 import type { HubCharacter } from '../characters/hubCharacters';
+import type { HubRoom } from '../multiplayer/HubRoom';
 
-export function useHubScene(character: HubCharacter) {
+export function useHubScene(character: HubCharacter, room: HubRoom) {
   const mountRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<SceneStatus>('loading');
   const [attempt, setAttempt] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [interaction, setInteraction] = useState<InteractionId | null>(null);
-  const [notice, setNotice] = useState('Personagem selecionado para exploração local. Escolha um ponto do piso ou uma área.');
+  const [notice, setNotice] = useState('Personagem selecionado. Aguarde a confirmação da sala para escolher um ponto do piso ou uma área.');
   const zoomRef = useRef(zoom);
   const sceneRef = useRef<HubSceneHandle | null>(null);
 
@@ -28,7 +29,7 @@ export function useHubScene(character: HubCharacter) {
       const scene = await HubScene.create({
         onInteraction: id => { if (active) setInteraction(id); },
         onNotice: message => { if (active) setNotice(message); },
-      }, character);
+      }, character, room);
       if (active) {
         sceneRef.current = scene;
         scene.setZoom(zoomRef.current);
@@ -45,7 +46,7 @@ export function useHubScene(character: HubCharacter) {
       sceneRef.current = null;
       dispose();
     };
-  }, [attempt, character]);
+  }, [attempt, character, room]);
 
   return {
     mountRef, status, zoom, interaction, notice,

@@ -5,18 +5,20 @@ import { HubCharacters } from './ui/HubCharacters';
 import './social-hub.css';
 import type { ReactNode } from 'react';
 import type { HubAccount, LoadCharacters, ObserveCharacters } from './characters/hubCharacters';
+import type { HubTransport } from './multiplayer/protocol';
 
 interface SocialHubProps {
   account: HubAccount | null;
   loadCharacters: LoadCharacters;
   observeCharacters: ObserveCharacters;
   connected: boolean;
+  transport: HubTransport;
   chooseClassic: () => void;
   chooseGame: () => void;
   foundryAction: ReactNode;
 }
 
-export function SocialHub({ account, loadCharacters, observeCharacters, connected, chooseClassic, chooseGame, foundryAction }: SocialHubProps) {
+export function SocialHub({ account, loadCharacters, observeCharacters, connected, transport, chooseClassic, chooseGame, foundryAction }: SocialHubProps) {
   return (
     <section className="social-hub" aria-labelledby="social-hub-title">
       <header className="social-hub-heading">
@@ -29,8 +31,8 @@ export function SocialHub({ account, loadCharacters, observeCharacters, connecte
         <Link className="ui-button ui-button-secondary" to={hubConfig.routes.mana} onClick={chooseGame}><ExternalLink size={16} aria-hidden="true" />Source of Mana</Link>
         <Link className="ui-button ui-button-ghost" to={hubConfig.routes.missions}><Scroll size={16} aria-hidden="true" />Quadro de missões</Link>
       </nav>
-      {account ? <HubCharacters account={account} load={loadCharacters} observe={observeCharacters} connected={connected} foundryAction={foundryAction} /> : <div className="social-hub-auth" role="status">Entre na sua conta Nimrod para acessar a prévia. A mesma sessão vale para todas as experiências.</div>}
-      <p className="social-hub-scope">Seu personagem usa um preset visual da classe, com caminhada e repouso. As peças do preset não alteram o inventário real. A exploração ainda é local; presença multiplayer fica para a Sprint 7. O Source of Mana continua acessível.</p>
+      {account ? <HubCharacters account={account} load={loadCharacters} observe={observeCharacters} connected={connected} transport={transport} foundryAction={foundryAction} /> : <div className="social-hub-auth" role="status">Entre na sua conta Nimrod para acessar a prévia. A mesma sessão vale para todas as experiências.</div>}
+      <p className="social-hub-scope">Salão compartilhado com presença e movimentação validadas pelo servidor. Os presets visuais não alteram o inventário real. Chat e interações sociais serão desenvolvidos na Sprint 8. O Source of Mana continua acessível.</p>
     </section>
   );
 }

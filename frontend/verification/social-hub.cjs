@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
+const { pathToFileURL } = require('node:url');
 const { spawn } = require('node:child_process');
 const { chromium } = require('playwright');
 const AxeBuilder = require('@axe-core/playwright').default;
@@ -10,7 +12,8 @@ const output = path.resolve(__dirname, '../node_modules/.cache/social-hub');
 fs.mkdirSync(output, { recursive: true });
 const passed = [], requests = [], errors = [];
 const user = { id: 'hub-verification-user', displayName: 'Conta de verificação', role: 'PLAYER' };
-const hubCharacter = (id = 'fixture-character', overrides = {}) => ({ id, userId: user.id, name: 'Personagem de verificação', level: 3,
+const fixtureId = value => { const hash = createHash('sha256').update(value).digest('hex'); return `${hash.slice(0,8)}-${hash.slice(8,12)}-4000-8000-${hash.slice(12,24)}`; };
+const hubCharacter = (id = 'fixture-character', overrides = {}) => ({ id: fixtureId(id), userId: user.id, name: 'Personagem de verificação', level: 3,
   classe: 'Mago', race: 'Elfo', foundryActorId: 'fixture-actor', active: true, retired: false, dead: false, ...overrides });
 let preview, browser;
 let foundryFailure = true;
@@ -34,6 +37,7 @@ async function ready() {
 }
 
 async function setup(authenticated = true, disableWebgl = false, mobile = false, rosterOptions = {}) {
+  const { SocialHubRoom } = await import(pathToFileURL(path.resolve(__dirname, '../../backend/src/services/socialHub/Room.js')).href);
   let rows = rosterOptions.rows ?? [hubCharacter()], rosterStatus = rosterOptions.status ?? 200, delay = rosterOptions.delay ?? 0;
   let socket, socketCount = 0;
   const localRequests = [];
@@ -87,6 +91,16 @@ async function setup(authenticated = true, disableWebgl = false, mobile = false,
   await context.route('**/__foundry_fixture__', route => route.fulfill({ contentType: 'text/html', body: '<title>Foundry fixture</title>' }));
   await context.routeWebSocket('**/ws', connectedSocket => {
     socket = connectedSocket; socketCount++;
+    const eligible = row => row.active === true && row.dead === false && row.retired === false && row.userId === user.id;
+    const room = new SocialHubRoom({
+      loadCharacter: async id => rows.find(row => row.id === id && eligible(row)) ?? null,
+      revalidate: async ids => rows.filter(row => ids.includes(row.id) && eligible(row)).map(row => ({ ...row, user_id: user.id })),
+    });
+    const peer = { readyState: 1, bufferedAmount: 0, send: data => { try { socket.send(data); } catch {} },
+      close: (code, reason) => { peer.readyState = 3; room.destroy(); void connectedSocket.close({ code, reason }); } };
+    room.attach(peer, user);
+    connectedSocket.onMessage(raw => room.accept(peer, raw));
+    connectedSocket.onClose(() => { peer.readyState = 3; room.destroy(); });
     socket.send(JSON.stringify({ type: 'CONNECTED', ts: Date.now() }));
   });
   const page = await context.newPage();
@@ -103,6 +117,7 @@ async function assertReady(page) {
   assert.equal(await page.locator('.social-hub-canvas canvas').count(), 1);
   await page.waitForFunction(() => window.__hubObservers.size === 1);
   assert.equal(await page.evaluate(() => window.__hubInputListeners.size), 1);
+  await page.getByRole('status').filter({ hasText: 'Conectado ao salão compartilhado.' }).waitFor();
 }
 
 async function explorerPosition(page) {
@@ -156,8 +171,8 @@ async function frameDifference(page, first, second) {
     await assertReady(page);
     assert.equal(requests.filter(r => r.pathname === '/api/me').length, 1);
     assert.ok(requests.some(r => r.pathname === '/api/me/characters'), 'HTML5 must load the existing authenticated character roster');
-    assert.equal(await page.getByRole('combobox', { name: 'Personagem para explorar', exact: true }).inputValue(), 'fixture-character');
-    assert.equal(await page.locator('.social-hub-canvas canvas').getAttribute('aria-label'), 'Exploração local com Personagem de verificação');
+    assert.equal(await page.getByRole('combobox', { name: 'Personagem para explorar', exact: true }).inputValue(), fixtureId('fixture-character'));
+    assert.equal(await page.locator('.social-hub-canvas canvas').getAttribute('aria-label'), 'Exploração multiplayer com Personagem de verificação');
     assert.equal(await page.locator('.social-hub-canvas canvas').getAttribute('data-avatar-preset'), 'wizard');
     assert.equal(await page.locator('.social-hub-canvas canvas').getAttribute('data-avatar-equipment'), 'visual-preset');
     passed.push('The real roster contract auto-selects a sole eligible character and labels the scene with its identity');
@@ -244,11 +259,15 @@ async function frameDifference(page, first, second) {
     assert.ok(keyboardPosition.x > arrived.x && keyboardPosition.y < arrived.y);
     await page.keyboard.down('s'); await page.waitForTimeout(80);
     await page.getByRole('button', { name: 'Aproximar câmera', exact: true }).focus();
+    const beforeStop = await explorerPosition(page);
+    await page.waitForFunction(() => document.querySelector('.social-hub-canvas canvas').dataset.walking === 'false');
     const blurred = await explorerPosition(page);
     await page.waitForTimeout(160); await page.keyboard.up('s');
     assert.deepEqual(await explorerPosition(page), blurred, 'Losing focus must clear held keys');
+    assert.ok(Math.hypot(blurred.x - beforeStop.x, blurred.y - beforeStop.y) < 0.3, 'Server acknowledgement and smoothing may finish the last bounded step');
     await page.getByRole('button', { name: 'Ir até Lareira', exact: true }).click();
     await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.querySelector('.social-hub-canvas canvas').dataset.walking === 'false');
     const stopped = await explorerPosition(page);
     await page.waitForTimeout(160);
     assert.deepEqual(await explorerPosition(page), stopped, 'Escape must cancel a queued path');
@@ -368,11 +387,11 @@ async function frameDifference(page, first, second) {
     await choice.waitFor();
     assert.equal(await choice.locator('option').count(), 3);
     assert.equal(await multiple.page.locator('.social-hub-canvas canvas').count(), 0);
-    await choice.selectOption('fixture-character'); await assertReady(multiple.page);
+    await choice.selectOption(fixtureId('fixture-character')); await assertReady(multiple.page);
     await multiple.page.evaluate(() => { window.__oldCharacterCanvas = document.querySelector('.social-hub-canvas canvas'); });
-    await choice.selectOption('second'); await assertReady(multiple.page);
+    await choice.selectOption(fixtureId('second')); await assertReady(multiple.page);
     assert.equal(await multiple.page.evaluate(() => window.__oldCharacterCanvas.isConnected), false);
-    assert.equal(await multiple.page.locator('.social-hub-canvas canvas').getAttribute('aria-label'), `Exploração local com ${other.name}`);
+    assert.equal(await multiple.page.locator('.social-hub-canvas canvas').getAttribute('aria-label'), `Exploração multiplayer com ${other.name}`);
     await multiple.page.getByRole('region', { name: 'Personagem selecionado', exact: true }).getByText(/Nível 11 · Ladina/).waitFor();
     await multiple.page.getByRole('img', { name: 'Retrato indisponível', exact: true }).waitFor();
     assert.equal(multiple.socketCount(), 1, 'Character selection cannot open another authentication/realtime connection');
@@ -389,15 +408,15 @@ async function frameDifference(page, first, second) {
     await choice.waitFor(); assert.equal(await choice.inputValue(), '');
     assert.equal(await choice.locator('option').count(), 3);
     assert.equal(await multiple.page.getByText('Forged event identity', { exact: true }).count(), 0);
-    await choice.selectOption('fixture-character'); await assertReady(multiple.page);
+    await choice.selectOption(fixtureId('fixture-character')); await assertReady(multiple.page);
     multiple.updateRoster([hubCharacter('fixture-character', { level: 9, classe: 'Guerreiro' }), third]);
     multiple.emit('FOUNDRY_ACTORS_SYNCED', { updated: 1 });
     await multiple.page.getByRole('region', { name: 'Personagem selecionado', exact: true }).getByText(/Nível 9 · Guerreiro/).waitFor();
     await assertReady(multiple.page);
-    assert.equal(await choice.inputValue(), 'fixture-character');
+    assert.equal(await choice.inputValue(), fixtureId('fixture-character'));
     passed.push('Existing character/sync events re-read canonical data, pause the scene, revoke dead selections and retain valid selections with updated metadata');
 
-    await choice.selectOption('third'); await assertReady(multiple.page);
+    await choice.selectOption(fixtureId('third')); await assertReady(multiple.page);
     const manualCard = multiple.page.getByRole('region', { name: 'Personagem selecionado', exact: true });
     await manualCard.getByText('Nível não informado · Classe não informada · Raça não informada', { exact: true }).waitFor();
     await manualCard.getByText('Personagem do Nimrod sem Actor Foundry vinculado', { exact: true }).waitFor();
@@ -445,7 +464,10 @@ async function frameDifference(page, first, second) {
     await gallery.page.goto(`${base}/lobby/html5`);
     const snapshots = new Map();
     for (const [id, classe] of classes) {
-      await gallery.page.getByRole('combobox', { name: 'Personagem para explorar', exact: true }).selectOption(id);
+      // StrictMode intentionally mounts twice. Respect the real JOIN budget while
+      // cycling thirteen fixtures; this is an art check, not a connection flood.
+      await gallery.page.waitForTimeout(1100);
+      await gallery.page.getByRole('combobox', { name: 'Personagem para explorar', exact: true }).selectOption(fixtureId(id));
       await assertReady(gallery.page);
       assert.equal(await gallery.page.locator('.social-hub-canvas canvas').getAttribute('data-avatar-preset'), id);
       const p = await floorPoint(gallery.page, { x: 4.7, y: 2.3 });

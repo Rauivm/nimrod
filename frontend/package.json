@@ -10,7 +10,9 @@
     "lint": "eslint src --max-warnings 0",
     "test": "node --test verification/*.test.mjs",
     "test:ui": "node verification/redesign.cjs",
-    "test:hub:ui": "node verification/social-hub.cjs"
+    "test:hub:ui": "node verification/social-hub.cjs",
+    "test:hub:multiplayer": "node verification/social-hub-multiplayer.cjs",
+    "sync:hub-world": "node verification/sync-hub-world.mjs --write"
   },
   "dependencies": {
     "date-fns": "^3.6.0",

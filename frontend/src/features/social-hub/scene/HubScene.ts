@@ -14,18 +14,23 @@ import { loadAvatarAtlas } from '../assets/avatarAtlas';
 import type { AvatarAtlas } from '../assets/avatarAtlas';
 import { resolveAppearance } from '../appearance/resolveAppearance';
 import type { AvatarAppearance } from '../appearance/resolveAppearance';
+import type { HubRoom } from '../multiplayer/HubRoom';
+import { RoomAvatars } from './RoomAvatars';
 
-/** Scene ownership boundary; presence and position authority remain a later sprint. */
+/** Scene ownership boundary; all avatar destinations come from the room server. */
 export class HubScene implements HubSceneHandle {
   private destroyed = false;
   private time = 0;
+  private hidden = document.hidden;
   private readonly camera: TavernCamera;
   private readonly explorer: TavernExplorer;
+  private readonly remotes: RoomAvatars;
   private readonly motion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-  private constructor(private readonly app: Application, private readonly atlas: TavernAtlas, private readonly avatarAtlas: AvatarAtlas, private readonly environment: TavernEnvironment, events: HubSceneEvents, character: HubCharacter, appearance: AvatarAppearance) {
+  private constructor(private readonly app: Application, private readonly atlas: TavernAtlas, private readonly avatarAtlas: AvatarAtlas, private readonly environment: TavernEnvironment, events: HubSceneEvents, character: HubCharacter, appearance: AvatarAppearance, room: HubRoom) {
     this.camera = new TavernCamera(app, environment.root, environment.bounds);
-    this.explorer = new TavernExplorer(app, environment, this.camera, events, this.updateMotion, character, avatarAtlas, appearance);
+    this.explorer = new TavernExplorer(app, environment, this.camera, events, this.updateMotion, character, avatarAtlas, appearance, room);
+    this.remotes = new RoomAvatars(environment, room, avatarAtlas, appearance.preset.id, this.updateMotion, events.onNotice, app.canvas);
     app.ticker.maxFPS = 30;
     app.ticker.add(this.animate);
     this.motion.addEventListener('change', this.updateMotion);
@@ -36,6 +41,7 @@ export class HubScene implements HubSceneHandle {
       document.removeEventListener('visibilitychange', this.updateMotion);
       app.ticker.remove(this.animate);
       this.explorer.destroy();
+      this.remotes.destroy();
       throw error;
     }
   }
@@ -47,24 +53,27 @@ export class HubScene implements HubSceneHandle {
     this.time += Math.min(ticker.deltaMS, 100) / 1000;
     this.environment.update(this.motion.matches ? 0 : this.time);
     this.explorer.update(ticker.deltaMS / 1000, this.time, this.motion.matches);
-    if (this.motion.matches && !this.explorer.active) { this.app.render(); this.app.stop(); }
+    this.remotes.update(ticker.deltaMS / 1000, this.time, this.motion.matches);
+    if (this.motion.matches && !this.explorer.active && !this.remotes.active) { this.app.render(); this.app.stop(); }
   };
 
   private updateMotion = () => {
-    if (this.destroyed) return;
+    if (this.destroyed || !this.explorer || !this.remotes) return;
     this.app.canvas.dataset.motion = this.motion.matches ? 'reduced' : 'full';
-    if (document.hidden) this.explorer.suspend();
-    if (document.hidden || (this.motion.matches && !this.explorer.active)) {
+    if (document.hidden && !this.hidden) this.explorer.suspend();
+    this.hidden = document.hidden;
+    if (document.hidden || (this.motion.matches && !this.explorer.active && !this.remotes.active)) {
       this.app.stop();
       this.environment.update(0);
       // A preference change can arrive between keyup and the final movement frame.
       // Commit idle/reduced-motion graphics before stopping the ticker.
       this.explorer.update(0, this.time, true);
+      this.remotes.update(0, this.time, true);
       this.app.render();
     } else this.app.start();
   };
 
-  static async create(events: HubSceneEvents, character: HubCharacter): Promise<HubScene> {
+  static async create(events: HubSceneEvents, character: HubCharacter, room: HubRoom): Promise<HubScene> {
     let atlas: TavernAtlas | undefined;
     let avatarAtlas: AvatarAtlas | undefined;
     const app = new Application();
@@ -88,7 +97,7 @@ export class HubScene implements HubSceneHandle {
       app.stage.addChild(environment.root);
       app.canvas.dataset.renderer = 'pixi-webgl';
       app.canvas.dataset.map = 'nimrod-tavern-v1';
-      return new HubScene(app, atlas, avatarAtlas, environment, events, character, appearance);
+      return new HubScene(app, atlas, avatarAtlas, environment, events, character, appearance, room);
     } catch (error) {
       // init can fail before Pixi has a renderer; Application.destroy assumes it exists.
       if (app.renderer) app.destroy(true, { children: true });
@@ -127,6 +136,7 @@ export class HubScene implements HubSceneHandle {
     document.removeEventListener('visibilitychange', this.updateMotion);
     this.app.ticker.remove(this.animate);
     this.explorer.destroy();
+    this.remotes.destroy();
     this.app.destroy(true, { children: true });
     this.environment.destroy();
     this.avatarAtlas.destroy();

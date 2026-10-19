@@ -23,8 +23,8 @@ import { mkdirSync } from 'fs';
 import { runMigrations } from './db/index.js';
 import { cfAuthMiddleware } from './middleware/auth.js';
 import { isFoundryRequest } from './lib/foundryAuth.js';
-import { registerClient } from './ws/broadcast.js';
-import { handleTavernMessage, handleTavernSocketClose } from './services/tavernRoom.js';
+import { connectNimrodSocket } from './ws/connection.js';
+import { socialHubRoom } from './services/socialHub/index.js';
 import { postRoutes } from './routes/posts.js';
 import { missionRoutes } from './routes/missions.js';
 import { missionIntegrationRoutes } from './routes/missionIntegration.js';
@@ -75,7 +75,8 @@ await fastify.register(cors, {
   allowedHeaders: ['Content-Type', 'X-Nimrod-Key', 'Authorization'],
 });
 
-await fastify.register(websocket);
+await fastify.register(websocket, { options: { maxPayload: 16384 } });
+fastify.addHook('onClose', async () => socialHubRoom.destroy());
 await fastify.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
 
 await fastify.register(staticFiles, {
@@ -91,33 +92,7 @@ fastify.get('/health', async () => ({ status: 'ok', ts: Date.now() }));
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 fastify.register(async function wsPlugin(app) {
-  app.get('/ws', { websocket: true }, async (connection, req) => {
-    // @fastify/websocket ≥8: connection é o socket diretamente
-    const socket = connection.socket ?? connection;
-    try {
-      // Cria um reply mínimo para que cfAuthMiddleware possa responder se necessário
-      const fakeReply = { code: () => ({ send: () => {} }) };
-      await cfAuthMiddleware(req, fakeReply);
-      if (!req.user) {
-        socket.close(1008, 'Unauthorized');
-        return;
-      }
-      registerClient(socket, req.user.id);
-      socket.send(JSON.stringify({ type: 'CONNECTED', ts: Date.now() }));
-
-      // Taverna: reusa esta mesma conexao pra JOIN/MOVE_REQUEST/DIRECTION_REQUEST/
-      // CHAT_SEND. Antes desta linha o /ws so empurrava eventos pro cliente —
-      // nunca tinha escutado nada vindo dele.
-      socket.on('message', (raw) => {
-        handleTavernMessage(req.user, socket, raw.toString()).catch((err) => {
-          app.log.error({ err }, '[tavern] falha ao processar mensagem do /ws');
-        });
-      });
-      socket.on('close', () => handleTavernSocketClose(socket));
-    } catch {
-      socket.close(1008, 'Unauthorized');
-    }
-  });
+  app.get('/ws', { websocket: true }, (connection, req) => connectNimrodSocket(connection, req, app.log));
 });
 
 // ── Hook de autenticação global ───────────────────────────────────────────────

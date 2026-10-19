@@ -34,6 +34,14 @@
 .social-hub-appearance { margin-top: 8px; font-size: var(--text-sm); color: var(--text-muted); }
 .social-hub-appearance summary { min-height: 28px; cursor: pointer; color: var(--gold-bright); }
 .social-hub-appearance p { max-width: 62ch; }
+.social-hub-presence { margin-bottom: 18px; padding: 16px 20px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); }
+.social-hub-presence header { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; }
+.social-hub-presence h2 { margin: 0; color: var(--text); font: 500 20px var(--font-display); }
+.social-hub-presence p { color: var(--text-muted); line-height: 1.6; overflow-wrap: anywhere; }
+.social-hub-presence ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; list-style: none; padding: 0; }
+.social-hub-presence li { display: grid; gap: 5px; min-width: 0; padding: 10px; border-left: 2px solid var(--gold-dim); overflow-wrap: anywhere; }
+.social-hub-presence strong { color: var(--text); font-size: var(--text-sm); }
+.social-hub-presence li span { color: var(--text-muted); font-size: var(--text-xs); }
 @media (max-width: 700px) {
   .social-hub-character-content { grid-template-columns: minmax(0, 1fr); gap: 16px; }
 }

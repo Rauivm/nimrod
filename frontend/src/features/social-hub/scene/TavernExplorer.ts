@@ -1,6 +1,7 @@
 import type { Application } from 'pixi.js';
 import { Navigation } from '../world/Navigation';
-import { ExplorerMovement } from '../world/ExplorerMovement';
+import { RoomMotion } from '../multiplayer/RoomMotion';
+import type { HubRoom } from '../multiplayer/HubRoom';
 import { unproject } from '../world/isometric';
 import { tavernMap as map } from '../world/tavernMap';
 import type { InteractionId } from '../world/tavernMap';
@@ -16,7 +17,11 @@ import type { AvatarAppearance } from '../appearance/resolveAppearance';
 const movementKeys = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight']);
 
 export class TavernExplorer {
-  private readonly movement = new ExplorerMovement(new Navigation(map), map.spawn);
+  private readonly navigation = new Navigation(map);
+  private readonly movement: RoomMotion;
+  private readonly unsubscribe: () => void;
+  private time = 0;
+  private confirmed = false;
   private readonly marker: ExplorerMarker;
   private readonly keys = new Set<string>();
   private pending: InteractionId | null = null;
@@ -31,7 +36,9 @@ export class TavernExplorer {
     character: HubCharacter,
     atlas: AvatarAtlas,
     appearance: AvatarAppearance,
+    private readonly room: HubRoom,
   ) {
+    this.movement = new RoomMotion({ ...character, position: map.spawn, direction: { x: 0, y: 1 }, moving: false, presence: 'online' });
     this.marker = new ExplorerMarker(character, atlas);
     environment.world.addChild(this.marker.root);
     environment.labels.addChild(this.marker.nameplate);
@@ -39,7 +46,7 @@ export class TavernExplorer {
     const canvas = app.canvas;
     canvas.tabIndex = 0;
     canvas.setAttribute('role', 'group');
-    canvas.setAttribute('aria-label', `Exploração local com ${character.name}`);
+    canvas.setAttribute('aria-label', `Exploração multiplayer com ${character.name}`);
     canvas.setAttribute('aria-describedby', 'tavern-controls');
     canvas.dataset.avatarPreset = appearance.preset.id;
     canvas.dataset.avatarEquipment = appearance.equipmentSource;
@@ -53,16 +60,17 @@ export class TavernExplorer {
     canvas.addEventListener('blur', this.suspend);
     window.addEventListener('blur', this.suspend);
     this.update(0, 0, true);
+    this.unsubscribe = room.subscribe(this.receive); this.receive();
   }
 
-  get active() { return this.movement.pending || this.keys.size > 0; }
+  get active() { return this.movement.active || this.keys.size > 0; }
 
   approach(id: InteractionId) {
     const point = map.points.find(item => item.id === id);
     if (!point) return;
     this.suspend();
     this.events.onInteraction(null);
-    if (!this.movement.walkTo(point.position)) {
+    if (this.room.getSnapshot().status !== 'joined' || !this.navigation.findPath(this.movement.position, point.position) || !this.room.move(point.position)) {
       this.events.onNotice('Não há caminho livre até este objeto.'); return;
     }
     this.pending = id;
@@ -72,7 +80,7 @@ export class TavernExplorer {
   }
 
   update(seconds: number, time: number, reduced: boolean) {
-    this.movement.update(seconds);
+    this.time = time; this.movement.update(seconds, time);
     this.marker.update(this.movement, time, reduced, seconds);
     const canvas = this.app.canvas, p = this.movement.position;
     // Local diagnostics contain no account or character identifiers.
@@ -81,7 +89,7 @@ export class TavernExplorer {
     canvas.dataset.walking = String(this.movement.moving);
     canvas.dataset.avatarFacing = this.marker.pose.facing;
     canvas.dataset.avatarFrame = String(this.marker.pose.frame);
-    if (!this.movement.pending && !this.keys.size) {
+    if (this.pending && this.distance(map.points.find(point => point.id === this.pending)!.position) < 0.035 && !this.movement.moving && !this.keys.size) {
       this.marker.target(null);
       if (this.pending) {
         const id = this.pending; this.pending = null;
@@ -93,12 +101,22 @@ export class TavernExplorer {
 
   suspend = () => {
     const wasActive = this.active;
-    this.keys.clear(); this.movement.stop(); this.pending = null;
+    this.keys.clear(); this.room.stopMoving(); this.pending = null;
     this.marker.target(null);
     this.pointerCancel();
-    this.update(0, 0, true);
+    this.update(0, this.time, true);
     this.app.render();
     if (wasActive) this.events.onNotice('Exploração pausada. Escolha um destino para continuar.');
+  };
+
+  private receive = () => {
+    const state = this.room.getSnapshot(), self = state.players.find(player => player.id === state.selfId);
+    this.marker.root.visible = this.marker.nameplate.visible = state.status === 'joined' && !!self;
+    if (self) { this.movement.accept(self, this.time, !this.confirmed); this.confirmed = true; }
+    else this.confirmed = false;
+    if (state.status !== 'joined' || state.error) { this.keys.clear(); this.pending = null; this.marker.target(null); }
+    this.app.canvas.dataset.roomStatus = state.status;
+    this.wake();
   };
 
   private localPoint(event: PointerEvent): Point {
@@ -137,7 +155,7 @@ export class TavernExplorer {
     this.suspend(); this.events.onInteraction(null);
     if (hit) { this.events.onNotice('Há um móvel aqui. Escolha um ponto livre do piso.'); return; }
     const target = unproject(local, map);
-    if (!this.movement.walkTo(target)) {
+    if (this.room.getSnapshot().status !== 'joined' || !this.navigation.findPath(this.movement.position, target) || !this.room.move(target)) {
       this.events.onNotice('Destino bloqueado ou fora do salão. Escolha um ponto livre do piso.'); return;
     }
     this.marker.target(target);
@@ -154,7 +172,8 @@ export class TavernExplorer {
   private keyDown = (event: KeyboardEvent) => {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     if (movementKeys.has(event.code)) {
-      event.preventDefault(); this.keys.add(event.code);
+      if (this.room.getSnapshot().status !== 'joined') { event.preventDefault(); return; }
+      event.preventDefault(); if (event.repeat) return; this.keys.add(event.code);
       this.pending = null; this.marker.target(null); this.events.onInteraction(null);
       this.updateInput(); this.wake();
     } else if (event.code === 'Escape') {
@@ -181,12 +200,12 @@ export class TavernExplorer {
     const has = (...codes: string[]) => codes.some(code => this.keys.has(code)) ? 1 : 0;
     const x = has('KeyD', 'ArrowRight') - has('KeyA', 'ArrowLeft');
     const y = has('KeyS', 'ArrowDown') - has('KeyW', 'ArrowUp');
-    this.movement.setInput({ x: x + y, y: y - x });
+    this.room.input({ x: x + y, y: y - x });
   }
 
   destroy() {
     this.pointerCancel();
-    this.movement.stop(); this.keys.clear(); this.pending = null;
+    this.unsubscribe(); this.keys.clear(); this.pending = null;
     const canvas = this.app.canvas;
     canvas.removeEventListener('pointerdown', this.pointerDown);
     canvas.removeEventListener('pointermove', this.pointerMove);

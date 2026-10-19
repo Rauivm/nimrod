@@ -8,6 +8,7 @@ import type { ReactNode } from 'react';
 import { hubConfig } from '../config/hubConfig';
 import { HubViewport } from './HubViewport';
 import { HubAppearance } from './HubAppearance';
+import type { HubTransport } from '../multiplayer/protocol';
 
 function CharacterPortrait({ character }: { character: HubCharacter }) {
   const [failed, setFailed] = useState<string[]>([]);
@@ -17,10 +18,11 @@ function CharacterPortrait({ character }: { character: HubCharacter }) {
     : <UserRound size={32} aria-label="Retrato indisponível" role="img" />}</div>;
 }
 
-export function HubCharacters({ account, load, observe, connected, foundryAction }: {
-  account: HubAccount; load: LoadCharacters; observe: ObserveCharacters; connected: boolean; foundryAction: ReactNode;
+export function HubCharacters({ account, load, observe, connected, transport, foundryAction }: {
+  account: HubAccount; load: LoadCharacters; observe: ObserveCharacters; connected: boolean; transport: HubTransport; foundryAction: ReactNode;
 }) {
   const roster = useHubCharacters(account.id, load, observe, connected);
+  const [admission] = useState(() => ({ blocked: false }));
   return <>
     <section className="social-hub-characters" aria-labelledby="hub-characters-title" aria-busy={roster.status === 'loading'}>
       <header><div><h2 id="hub-characters-title">Seu personagem na taverna</h2><p>Conta: {account.displayName || 'Conta Nimrod'}</p></div>
@@ -30,7 +32,7 @@ export function HubCharacters({ account, load, observe, connected, foundryAction
         : !roster.characters.length ? <p role="status">Nenhum personagem ativo, vivo e não aposentado está vinculado à sua conta. <Link to={hubConfig.routes.profile}>Vincular personagem no Perfil</Link></p>
         : <div className="social-hub-character-content"><div>
           <label htmlFor="hub-character-choice">Personagem para explorar</label>
-          <select id="hub-character-choice" value={roster.selectedId ?? ''} onChange={event => roster.select(event.target.value)}>
+          <select id="hub-character-choice" value={roster.selectedId ?? ''} onChange={event => { admission.blocked = false; roster.select(event.target.value); }}>
             <option value="">Selecione um personagem</option>
             {roster.characters.map(character => <option key={character.id} value={character.id}>{character.name} · {character.level === null ? 'Nível não informado' : `Nível ${character.level}`}</option>)}
           </select>
@@ -43,6 +45,6 @@ export function HubCharacters({ account, load, observe, connected, foundryAction
           </section> : <p role="status">Escolha um personagem vinculado para entrar na taverna.</p>}
         </div>}
     </section>
-    {roster.selected && <HubViewport key={roster.selected.id} character={roster.selected} foundryAction={foundryAction} />}
+    {roster.selected && <HubViewport key={roster.selected.id} character={roster.selected} transport={transport} connected={connected} admission={admission} foundryAction={foundryAction} />}
   </>;
 }

@@ -22,13 +22,13 @@ export function WsProvider({ children }) {
 
     ws.onopen = () => {
       retryRef.current = 0;                 // reset backoff on success
-      setConnected(true);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (wsRef.current !== ws) return;
       wsRef.current = null;
       setConnected(false);
+      if (event.code === 1008 && event.reason === 'Unauthorized') deadRef.current = true;
       if (deadRef.current) return;
       // Exponential backoff: 1s, 2s, 4s, 8s … cap at 30s
       const delay = Math.min(1000 * 2 ** retryRef.current, 30_000);
@@ -41,6 +41,7 @@ export function WsProvider({ children }) {
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
+        if (msg.type === 'CONNECTED') setConnected(true);
 
         // Server closed connection due to auth failure — stop retrying
         if (msg.type === 'ERROR' && msg.error === 'Unauthorized') {
@@ -77,8 +78,14 @@ export function WsProvider({ children }) {
     };
   }, []);
 
+  const send = useCallback(message => {
+    const socket = wsRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 32768) return false;
+    try { socket.send(JSON.stringify(message)); return true; } catch { return false; }
+  }, []);
+
   return (
-    <WsContext.Provider value={{ on, connected }}>
+    <WsContext.Provider value={{ on, send, connected }}>
       {children}
     </WsContext.Provider>
   );

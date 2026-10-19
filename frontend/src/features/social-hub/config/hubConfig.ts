@@ -3,7 +3,7 @@ export const hubConfig = Object.freeze({
   identity: Object.freeze({
     name: 'Taverna Nimrod',
     description: 'Um novo espaço de encontro para a comunidade, dentro da sua conta Nimrod.',
-    stage: 'Experimental · Sprint 6',
+    stage: 'Experimental · Sprint 7',
   }),
   routes: Object.freeze({
     html5: '/lobby/html5',

@@ -11,7 +11,7 @@ export interface AvatarTextureLayer {
 }
 
 /** Loads only sheets used by this recipe. All sources/textures belong to one scene. */
-export async function loadAvatarAtlas(appearance: AvatarAppearance) {
+export async function loadAvatarAtlas(appearance: AvatarAppearance, signal?: AbortSignal) {
   const sources = new Map<AvatarSheetId, ImageSource>();
   const images: HTMLImageElement[] = [], textures: Texture[] = [];
   let disposed = false;
@@ -21,6 +21,9 @@ export async function loadAvatarAtlas(appearance: AvatarAppearance) {
     sources.forEach(source => source.destroy());
     images.forEach(image => { image.src = ''; });
   };
+  const abort = () => destroy();
+  if (signal?.aborted) throw new DOMException('Avatar load cancelled', 'AbortError');
+  signal?.addEventListener('abort', abort, { once: true });
   try {
     const layers: AvatarTextureLayer[] = [];
     for (const layer of appearance.layers) {
@@ -29,6 +32,7 @@ export async function loadAvatarAtlas(appearance: AvatarAppearance) {
         const image = new Image(); images.push(image);
         image.decoding = 'async'; image.src = `/social-hub/${metadata.file}`;
         await image.decode();
+        if (signal?.aborted) throw new DOMException('Avatar load cancelled', 'AbortError');
         if (image.naturalWidth !== metadata.width || image.naturalHeight !== metadata.height) throw new Error('Unexpected avatar sheet dimensions');
         sources.set(sheet, new ImageSource({ resource: image, scaleMode: 'linear' }));
       }
@@ -43,6 +47,7 @@ export async function loadAvatarAtlas(appearance: AvatarAppearance) {
     }
     return { layers, destroy };
   } catch (error) { destroy(); throw error; }
+  finally { signal?.removeEventListener('abort', abort); }
 }
 
 export type AvatarAtlas = Awaited<ReturnType<typeof loadAvatarAtlas>>;

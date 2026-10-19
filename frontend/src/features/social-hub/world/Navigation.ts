@@ -10,7 +10,7 @@ interface Obstacle { left: number; right: number; top: number; bottom: number }
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
 const finite = (p: Point) => Number.isFinite(p.x) && Number.isFinite(p.y);
 
-/** Local navigation only. The future multiplayer server must own its own validation. */
+/** Pure geometry/pathfinding, also compiled for the authoritative room server. */
 export class Navigation {
   readonly step = 0.25;
   readonly radius = 0.18;

@@ -13,10 +13,11 @@ export class ExplorerMarker {
   readonly nameplate = new Container({ label: 'selected-character-nameplate' });
   private readonly avatar: AvatarSprite;
 
-  constructor(character: HubCharacter, atlas: AvatarAtlas) {
+  constructor(character: HubCharacter, atlas: AvatarAtlas, local = true) {
+    this.root.label = local ? 'local-explorer-marker' : 'remote-character-marker';
     this.avatar = new AvatarSprite(atlas);
     const base = new Graphics().ellipse(0, 0, 16, 8).fill({ color: 0x10302a, alpha: 0.42 })
-      .stroke({ color: 0x8ce0d2, alpha: 0.55, width: 1 });
+      .stroke({ color: local ? 0x8ce0d2 : 0xd6ac61, alpha: 0.55, width: 1 });
     this.root.addChild(base, this.avatar.root);
     const name = character.name.length > 32 ? `${character.name.slice(0, 31)}…` : character.name;
     const label = new Text({ text: `${name}\n${character.level === null ? 'Nível não informado' : `Nível ${character.level}`}`,
@@ -36,11 +37,12 @@ export class ExplorerMarker {
 
   get pose() { return this.avatar.pose; }
 
-  update(movement: ExplorerMovement, time: number, reduced: boolean, seconds = 0) {
+  update(movement: Pick<ExplorerMovement, 'position' | 'direction' | 'moving'>, time: number, reduced: boolean, seconds = 0) {
     const p = project(movement.position, map);
     this.root.position.set(p.x, p.y);
     this.nameplate.position.set(p.x, p.y);
     this.root.zIndex = depthAt(movement.position);
+    this.nameplate.zIndex = this.root.zIndex;
     this.avatar.update(movement.direction, movement.moving, seconds, time, reduced);
   }
 }
